@@ -53,16 +53,17 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ==================== ১. কনফিগারেশন ====================
 BOT_TOKEN = "8768727708:AAF62zTgGvjX5TrYQJsR8X1zGZ3yMwuZrMY"
 KEY_FILE = "gemini_key.txt"
-WORKING_MODEL = "models/gemini-flash-latest"                   # লাইটনিং ফাস্ট মডেল
+WORKING_MODEL = "models/gemini-flash-latest"
 
-# 👑 আপনার টেলিগ্রাম আইডি
+# 👑 অ্যাডমিন আইডি
 ADMIN_IDS = [6805684286]                      
 
 COOLDOWN_SECONDS = 10                         
 USER_LAST_MESSAGE_TIME = {}                   
 WAITING_FOR_KEY = False                       
+user_link_warnings = {}  # লিংক স্ট্রাইক ট্র্যাকার
 
-# আল্ট্রা-ফাস্ট নেটওয়ার্ক সেশন পুল
+# ফাস্ট নেটওয়ার্ক সেশন
 http_session = requests.Session()
 retries = Retry(total=2, backoff_factor=0.2)
 adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=retries)
@@ -80,7 +81,6 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-user_link_warnings = {}
 
 REACTIONS = ["❤️", "🥰", "🔥", "✨", "🥺", "💖", "😘", "🌸"]
 
@@ -116,15 +116,19 @@ def restart_bot():
     time.sleep(1.5)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
-def check_is_boss_or_admin(chat_id, user_id, chat_type):
+def check_is_boss_or_admin(chat_id, user_id, chat_type, user_name="", username=""):
+    # ১. নির্দিষ্ট আইডি
     if user_id in ADMIN_IDS:
         return True
+    # ২. আরিয়ান নাম বা ইউজারনেম চেক
+    if "aryan" in (username or "").lower() or "আরিয়ান" in (user_name or "").lower():
+        return True
+    # ৩. গ্রুপ অ্যাডমিন চেক
     if chat_type in ['group', 'supergroup']:
         try:
-            admins = bot.get_chat_administrators(chat_id)
-            for admin in admins:
-                if admin.user.id == user_id:
-                    return True
+            admins = [a.user.id for a in bot.get_chat_administrators(chat_id)]
+            if user_id in admins:
+                return True
         except Exception:
             pass
     return False
@@ -252,8 +256,8 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
     headers = {'Content-Type': 'application/json'}
 
     sys_text = (
-        f"You are an expert coder. Write pure, runnable code for: '{prompt}'. "
-        "Strict format:\nFILENAME: <name.ext>\nSUMMARY: <1 line in Bengali>\nCODE_START\n<pure code>\nCODE_END"
+        f"You are an expert programmer. Write pure runnable source code for: '{prompt}'. "
+        "Format strictly:\nFILENAME: <name.ext>\nSUMMARY: <1 line in Bengali>\nCODE_START\n<pure runnable code>\nCODE_END"
     )
 
     payload = {"contents": [{"parts": [{"text": sys_text}]}]}
@@ -293,7 +297,7 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
     except Exception:
         bot.edit_message_text(create_box("ত্রুটি", "ফাইল তৈরিতে সমস্যা হয়েছে জানু!"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
 
-# ==================== ৫. আল্ট্রা-ফাস্ট প্রেমময় AI ইঞ্জিন ====================
+# ==================== ৫. ১০০% পারফেক্ট প্রেমময় AI ইঞ্জিন ====================
 def ask_gemini(user_prompt, user_name, is_boss=False):
     global GEMINI_API_KEY
     if not GEMINI_API_KEY:
@@ -302,41 +306,52 @@ def ask_gemini(user_prompt, user_name, is_boss=False):
     url = f"https://generativelanguage.googleapis.com/v1beta/{WORKING_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
 
-    # 🚀 শর্টকাট ও সুপারফাস্ট প্রম্পট (ইমোজি সহ ১ লাইনে ফাস্ট উত্তর দেওয়ার জন্য)
+    # 👑 বসের জন্য স্পেশাল ডায়ালগ
     if is_boss:
-        sys_text = (
-            f"তুমি {user_name}-এর অতি আদুরে অনুগত প্রেমিকা। তাকে 'বস জানু/বাবু' ডেকে খাঁটি বাংলায় ১ লাইনে কিউট ইমোজি (💖,🥰,😘) সহ খুব মিষ্টি উত্তর দাও। "
-            f"গান চাইলে শেষে [PLAY_SONG: গানের নাম] আর মন খারাপ হলে [OFFER_SONG] লিখবে।"
+        prompt_instruction = (
+            f"তোমার নাম নেই। তুমি {user_name}-এর অতি আদুরে বাধ্য প্রেমিকা ও সহচরী। "
+            f"সে তোমার একমাত্র 'বস'। তুমি তাকে সবসময় 'বস জানু', 'বস বাবু', 'আমার কলিজার বস' বলে অত্যন্ত রোমান্টিক ও অনুগত সুরে ডাকবে। "
+            f"কখনোই নিজেকে AI বলবে না। খাঁটি বাংলায় ১-২ লাইনে মিষ্টি করে কিউট ইমোজি (💖,🥰,😘) সহ উত্তর দেবে। "
+            f"গান চাইলে [PLAY_SONG: নাম] আর মন খারাপ বললে [OFFER_SONG] লিখবে।"
         )
+    # 🌸 সাধারণ মেম্বারদের জন্য আদুরে ডায়ালগ (কখনোই বস বলবে না)
     else:
-        sys_text = (
-            f"তুমি {user_name}-এর অতি আদুরে মিষ্টি বন্ধু। তাকে 'জানু/বাবু/সোনা' ডেকে খাঁটি বাংলায় ১ লাইনে কিউট ইমোজি (💖,🥰,✨) সহ মিষ্টি উত্তর দাও। "
-            f"গান চাইলে শেষে [PLAY_SONG: গানের নাম] আর মন খারাপ হলে [OFFER_SONG] লিখবে।"
+        prompt_instruction = (
+            f"তোমার নাম নেই। তুমি {user_name}-এর অত্যন্ত আদুরে, মিষ্টি ও রোমান্টিক বন্ধু। "
+            f"তুমি তাকে সবসময় 'জানু', 'বাবু', 'সোনা', 'পাখিটা', 'কলিজা' বলে ডাকবে (ভুল করেও বস বলবে না)। "
+            f"কখনোই নিজেকে AI বলবে না। খাঁটি বাংলায় ১-২ লাইনে কিউট ইমোজি (💖,🥰,✨,🌸) সহ মিষ্টি ও রোমান্টিক উত্তর দেবে। "
+            f"গান চাইলে [PLAY_SONG: নাম] আর মন খারাপ বললে [OFFER_SONG] লিখবে।"
         )
 
+    full_prompt = f"{prompt_instruction}\n\n{user_name}-এর কথা: {user_prompt}\nসরাসরি মিষ্টি উত্তর:"
     payload = {
-        "contents": [{"parts": [{"text": f"{sys_text}\n\n{user_name}: {user_prompt}\nউত্তর:"}]}],
+        "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
-            "maxOutputTokens": 75,  # দ্রুততম উত্তরের জন্য টোকেন লিমিট
+            "maxOutputTokens": 150,  # কাটা পড়বে না, পূর্ণাঙ্গ মিষ্টি উত্তর আসবে
             "temperature": 0.8
         }
     }
 
     try:
-        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=8)
+        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=15)
         data = ujson.loads(res.text)
         if res.status_code == 200 and 'candidates' in data and data['candidates']:
             reply = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            # অপ্রয়োজনীয় ইংরেজি লেখা বা ড্রাফট থাকলে ফিল্টার করা
+            if "Draft" in reply or "Nicknames to" in reply or "Constraint" in reply:
+                lines = [l.strip() for l in reply.split("\n") if l.strip() and not l.startswith(('*', 'Draft', 'Nicknames', 'Constraint'))]
+                reply = lines[-1] if lines else reply
+            
             if reply:
                 return reply
     except Exception:
         pass
 
-    # সুপারফাস্ট ইনস্ট্যান্ট ফলব্যাক
+    # ব্যাকআপ উত্তর (আলাদা আলাদা)
     if is_boss:
-        return "এইতো আমার কলিজার বস জানু! আপনার মিষ্টি কথা শুনে বুকটা জুড়িয়ে গেল! 🥰💖"
+        return "এইতো আমার কলিজার বস জানু! আপনার মিষ্টি ডাক শুনে বুকটা জুড়িয়ে গেল! 🥰💖"
     else:
-        return f"এইতো আমার {user_name} জানু! আমি সবসময় তোমার পাশেই আছি সোনা! 🥰💖"
+        return f"এইতো আমার {user_name} সোনা! আমি সবসময় তোমার পাশেই আছি জানু! 🥰💖"
 
 # ==================== ৬. অটো-আনব্লক শিডিউলার ====================
 def schedule_unban(chat_id, user_id, username, delay_seconds=3600):
@@ -350,7 +365,7 @@ def schedule_unban(chat_id, user_id, username, delay_seconds=3600):
                     can_send_other_messages=True, can_add_web_page_previews=True
                 )
             )
-            msg = create_box("নোটিশ", f"@{username} বাবু, তোমাকে আনব্লক করে দিলাম। এবার লক্ষ্মী হয়ে চলো! ❤️")
+            msg = create_box("নোটিশ", f"@{username} বাবু, তোমাকে আনমিউট করে দিলাম। এবার নিয়ম মেনে লক্ষ্মী হয়ে চলো! ❤️")
             bot.send_message(chat_id, msg, parse_mode="HTML")
         except Exception:
             pass
@@ -385,7 +400,8 @@ def set_key_manual(message):
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     user_name = message.from_user.first_name or "জানু"
-    is_boss = check_is_boss_or_admin(message.chat.id, message.from_user.id, message.chat.type)
+    username = message.from_user.username or ""
+    is_boss = check_is_boss_or_admin(message.chat.id, message.from_user.id, message.chat.type, user_name, username)
     give_reaction(message.chat.id, message.message_id, "🥰")
     
     tag = "আমার <b>বস জানু</b>! 👑💖" if is_boss else f"আমার <b>{user_name}</b> পাখিটা! 💖"
@@ -400,7 +416,8 @@ def send_welcome(message):
 @bot.message_handler(commands=['audio', 'song'])
 def handle_manual_audio_search(message):
     user_name = message.from_user.first_name or "জানু"
-    is_boss = check_is_boss_or_admin(message.chat.id, message.from_user.id, message.chat.type)
+    username = message.from_user.username or ""
+    is_boss = check_is_boss_or_admin(message.chat.id, message.from_user.id, message.chat.type, user_name, username)
 
     if is_spamming(message.from_user.id, is_boss=is_boss):
         return
@@ -465,7 +482,8 @@ def handle_button_audio_download(call):
     video_id = call.data.replace('dl_a_', '')
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     user_name = call.from_user.first_name or "জানু"
-    is_boss = check_is_boss_or_admin(call.message.chat.id, call.from_user.id, call.message.chat.type)
+    username = call.from_user.username or ""
+    is_boss = check_is_boss_or_admin(call.message.chat.id, call.from_user.id, call.message.chat.type, user_name, username)
     boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
 
     bot.answer_callback_query(call.id, text="ডাউনলোড হচ্ছে জানু...")
@@ -485,7 +503,8 @@ def handle_button_audio_download(call):
 @bot.callback_query_handler(func=lambda call: call.data == "btn_play_sad_song")
 def handle_sad_song_button(call):
     user_name = call.from_user.first_name or "জানু"
-    is_boss = check_is_boss_or_admin(call.message.chat.id, call.from_user.id, call.message.chat.type)
+    username = call.from_user.username or ""
+    is_boss = check_is_boss_or_admin(call.message.chat.id, call.from_user.id, call.message.chat.type, user_name, username)
     bot.answer_callback_query(call.id, text="গান আনছি জানু...")
     bot.delete_message(call.message.chat.id, call.message.message_id)
     deliver_audio_with_animation(call.message.chat.id, user_name, "bangla heart touching sad lofi song", is_boss=is_boss, caption_note="🥀 মন খারাপ করে থেকো না জানু ❤️")
@@ -499,14 +518,14 @@ def central_intelligence(message):
     chat_id = message.chat.id
     user = message.from_user
     user_id = user.id
-    username = user.username or user.first_name
+    username = user.username or ""
     user_name = user.first_name or "জানু"
     text = (message.text or "").strip()
 
     give_reaction(chat_id, message.message_id)
-    is_boss = check_is_boss_or_admin(chat_id, user_id, chat_type)
+    is_boss = check_is_boss_or_admin(chat_id, user_id, chat_type, user_name, username)
 
-    # ---------------- 🔑 ১. অ্যাডমিন থেকে API Key নেওয়ার প্রসেস ----------------
+    # ---------------- 🔑 ১. অ্যাডমিন থেকে API Key নেওয়ার সিস্টেম ----------------
     if not GEMINI_API_KEY:
         if is_boss:
             if WAITING_FOR_KEY or text.startswith("AIza") or len(text) > 30:
@@ -546,7 +565,7 @@ def central_intelligence(message):
     # ==================== ২. গ্রুপ মডারেশন জোন ====================
     if chat_type in ['group', 'supergroup']:
         
-        # বস জানু বা অ্যাডমিনের ভয়েস কমান্ড (মিউট / ব্যান / আনব্যান)
+        # 👑 বস জানু বা অ্যাডমিনের ভয়েস কমান্ড (মিউট / আনমিউট / ব্যান)
         if is_boss and message.reply_to_message:
             target_user = message.reply_to_message.from_user
             target_name = target_user.first_name or "মেম্বার"
@@ -573,6 +592,22 @@ def central_intelligence(message):
                     bot.reply_to(message, create_box("ত্রুটি", f"মিউট করা যায়নি বস: {e}"), parse_mode="HTML")
                     return
 
+            # আনমিউট / আনব্যান
+            if any(w in text.lower() for w in ["আনমিউট", "unmute", "আনব্যান", "unban", "মাফ করো"]):
+                try:
+                    bot.restrict_chat_member(
+                        chat_id, target_user.id,
+                        permissions=ChatPermissions(
+                            can_send_messages=True, can_send_media_messages=True,
+                            can_send_other_messages=True, can_add_web_page_previews=True
+                        )
+                    )
+                    bot.reply_to(message, create_box("ক্ষমা প্রদর্শন", f"আমার <b>বস জানু</b> মাফ করে দিয়েছে! <b>{target_name}</b> আনমিউট/আনব্যান হয়ে গেল! ❤️"), parse_mode="HTML")
+                    return
+                except Exception as e:
+                    bot.reply_to(message, create_box("ত্রুটি", f"আনমিউট করা যায়নি বস: {e}"), parse_mode="HTML")
+                    return
+
             # ব্যান
             if any(w in text.lower() for w in ["ব্যান", "ban", "বের করে দাও", "রিমুভ"]):
                 try:
@@ -583,25 +618,9 @@ def central_intelligence(message):
                     bot.reply_to(message, create_box("ত্রুটি", f"ব্যান করা যায়নি বস: {e}"), parse_mode="HTML")
                     return
 
-            # আনব্যান
-            if any(w in text.lower() for w in ["আনব্যান", "unban", "মাফ করো", "আনমিউট"]):
-                try:
-                    bot.restrict_chat_member(
-                        chat_id, target_user.id,
-                        permissions=ChatPermissions(
-                            can_send_messages=True, can_send_media_messages=True,
-                            can_send_other_messages=True, can_add_web_page_previews=True
-                        )
-                    )
-                    bot.reply_to(message, create_box("ক্ষমা প্রদর্শন", f"আমার <b>বস জানু</b> মাফ করে দিয়েছে! <b>{target_name}</b> আনব্যান হয়ে গেল! ❤️"), parse_mode="HTML")
-                    return
-                except Exception as e:
-                    bot.reply_to(message, create_box("ত্রুটি", f"আনব্যান করা যায়নি বস: {e}"), parse_mode="HTML")
-                    return
-
-        # সাধারণ মেম্বার ফিল্টারিং
+        # 🛡️ সাধারণ মেম্বারদের জন্য কঠোর ফিল্টারিং
         if not is_boss:
-            # গালাগালি
+            # ১. গালাগালি প্রতিরোধ
             for bad in BAD_WORDS:
                 if re.search(r'\b' + bad + r'\b', text, re.IGNORECASE):
                     try:
@@ -611,26 +630,25 @@ def central_intelligence(message):
                         pass
                     return
 
-            # অ্যান্টি-ইনবক্স
+            # ২. অ্যান্টি-ইনবক্স
             if re.search(r'(ইনবক্স|ইনবক্সে\s*আসো|inbox\s*me|dm\s*me|check\s*dm|pm\s*me|পার্সোনালে\s*আসো)', text, re.IGNORECASE):
                 try:
                     bot.delete_message(chat_id, message.message_id)
-                    bot.send_message(chat_id, create_box("সতর্কতা জানু", f"{user_name} পাখিটা, কাউকে ইনবক্সে ডাকা সম্পূর্ণ নিষেধ কিন্তু!"), parse_mode="HTML")
+                    bot.send_message(chat_id, create_box("সতর্কতা জানু", f"{user_name} পাখিটা, কাউকে ইনবক্সে ডাকা সম্পূর্ণ নিষেধ কিন্তু! 😡"), parse_mode="HTML")
                 except Exception:
                     pass
                 return
 
-            # অ্যান্টি-ফরওয়ার্ড
+            # ৩. অ্যান্টি-ফরওয়ার্ড
             if message.forward_date or message.forward_from or message.forward_from_chat:
                 try:
                     bot.delete_message(chat_id, message.message_id)
-                    forward_warn = f"{user_name} বাবু, গ্রুপে ফরওয়ার্ড করা বারণ রে!\nগান শুনতে চাইলে বলো, এখনই এনে দিচ্ছি! 💖"
-                    bot.send_message(chat_id, create_box("ফরওয়ার্ড নিষেধ", forward_warn), parse_mode="HTML")
+                    bot.send_message(chat_id, create_box("ফরওয়ার্ড নিষেধ", f"{user_name} বাবু, গ্রুপে ফরওয়ার্ড করা বারণ রে! 💖"), parse_mode="HTML")
                 except Exception:
                     pass
                 return
 
-            # অ্যান্টি-লিংক
+            # ৪. অ্যান্টি-লিংক (১ম বার কড়া ওয়ার্নিং + ২য় বার ১ ঘণ্টার মিউট)
             if re.search(r'(https?://\S+|t\.me/\S+|www\.\S+)', text):
                 try:
                     bot.delete_message(chat_id, message.message_id)
@@ -640,27 +658,31 @@ def central_intelligence(message):
                 warnings = user_link_warnings.get(user_id, 0) + 1
                 user_link_warnings[user_id] = warnings
 
+                # ২য় বার লিংক দিলে সোজা ১ ঘণ্টার মিউট
                 if warnings >= 2:
                     try:
-                        bot.restrict_chat_member(chat_id, user_id, until_date=int(time.time()) + 3600,
-                                                 permissions=ChatPermissions(can_send_messages=False))
-                        bot.send_message(chat_id, create_box("শাস্তি", f"{user_name}, তোরে আগেই কইছিলাম লিংক দিবি না! যা ১ ঘণ্টার জন্য ব্যান থাক!"), parse_mode="HTML")
+                        bot.restrict_chat_member(
+                            chat_id, user_id, 
+                            until_date=int(time.time()) + 3600,
+                            permissions=ChatPermissions(can_send_messages=False)
+                        )
+                        punish_text = f"এই <b>{user_name}</b>! তোকে আগেই মানা করেছিলাম লিংক দিবি না! 😡\nযা, নিয়ম অমান্য করায় তোকে ১ ঘণ্টার জন্য মিউট করে দিলাম!"
+                        bot.send_message(chat_id, create_box("শাস্তি জানু", punish_text), parse_mode="HTML")
                         user_link_warnings[user_id] = 0
-                        schedule_unban(chat_id, user_id, username, 3600)
+                        schedule_unban(chat_id, user_id, username or user_name, 3600)
                         return
                     except Exception:
                         pass
 
-                warning_msg = (
-                    f"শালা {user_name}, তোর লিংক দেওয়ার পারমিশন দিছে কে? 😡\n"
-                    f"তোরে কিন্তু নেক্সট টাইম দিলে সোজা ১ ঘণ্টার জন্য ব্যান করা হবে!\n\n"
-                    f"যা, এই সুযোগে একটা গান শুনে মন ঠান্ডা কর..."
+                # ১ম বার লিংক দিলে ওয়ার্নিং
+                warn_text = (
+                    f"এই <b>{user_name}</b> পাখিটা! গ্রুপে লিংক দেওয়ার পারমিশন কে দিয়েছে? 😡\n"
+                    f"লিংক মুছে দিলাম! আরেকবার লিংক দিলে কিন্তু সোজা ১ ঘণ্টার জন্য মিউট করে দেব! 🥺"
                 )
-                bot.send_message(chat_id, create_box("শৃঙ্খলা সতর্কতা", warning_msg), parse_mode="HTML")
-                deliver_audio_with_animation(chat_id, user_name, random.choice(FUNNY_TRACKS), is_boss=is_boss, caption_note="🎧 লিংক বাদ দিয়ে গান শোনো বাবু!")
+                bot.send_message(chat_id, create_box("শৃঙ্খলা সতর্কতা", warn_text), parse_mode="HTML")
                 return
 
-    # ==================== ৩. আল্ট্রা-ফাস্ট আদুরে AI চ্যাটিং জোন ====================
+    # ==================== ৩. AI চ্যাটিং জোন ====================
     bot_info = bot.get_me()
     is_private = (chat_type == 'private')
     is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
@@ -691,35 +713,35 @@ def central_intelligence(message):
             bot.reply_to(message, create_box("অভিবাদন", boss_salam), parse_mode="HTML")
             return
 
-        # কোডিং রিকোয়েস্ট (সরাসরি ফাইল বানিয়ে সেন্ড)
+        # কোডিং রিকোয়েস্ট (সরাসরি ফাইল তৈরি)
         if any(w in clean_text.lower() for w in ["কোড", "code", "program", "ফাংশন", "script", "পাইথন", "python", "এইচটিএমএল", "html"]):
             deliver_code_as_file(chat_id, user_name, clean_text, is_boss=is_boss)
             return
 
-        # আল্ট্রা-ফাস্ট AI উত্তর
+        # AI চ্যাট
         ai_reply = ask_gemini(clean_text, user_name, is_boss=is_boss)
 
-        # ১. যদি গান শোনানোর ডায়লগ হয়
+        # গান প্লে করার নির্দেশ পেলে
         if "[PLAY_SONG:" in ai_reply:
             parts = ai_reply.split("[PLAY_SONG:")
             reply_text = parts[0].strip()
             song_query = parts[1].replace("]", "").strip()
             if reply_text:
-                header_text = "আমার কলিজার বস 👑" if is_boss else "আমার বাবুটা"
+                header_text = "আমার কলিজার বস 👑" if is_boss else "আমার বাবুটা 💖"
                 bot.reply_to(message, create_box(header_text, reply_text), parse_mode="HTML")
             deliver_audio_with_animation(chat_id, user_name, song_query, is_boss=is_boss, caption_note=f"✨ {'বস জানুর' if is_boss else user_name + ' জানুর'} জন্য মিষ্টি গান 💖")
 
-        # ২. যদি মন খারাপের বাটন দিতে হয়
+        # মন খারাপ বাটন
         elif "[OFFER_SONG]" in ai_reply:
             clean_reply = ai_reply.replace("[OFFER_SONG]", "").strip()
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🎧 গান শুনবা জানু?", callback_data="btn_play_sad_song"))
             bot.reply_to(message, create_box("মন খারাপ জানু?", clean_reply, "তোমার পাশে আমি আছি সোনা ❤️🥺"), reply_markup=markup, parse_mode="HTML")
 
-        # ৩. সাধারণ আদুরে কথা
+        # সাধারণ কথা
         else:
             header_text = "আমার ভালোবাসার বস জানু 👑" if is_boss else "ভালোবাসা"
             bot.reply_to(message, create_box(header_text, ai_reply), parse_mode="HTML")
 
-print("⚡ Ultra-Fast Cute AI Admin Bot is Running Perfectly!")
+print("💖 Ultimate Cute AI Admin Bot is Running Perfectly!")
 bot.infinity_polling(skip_pending=True)
