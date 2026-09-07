@@ -54,11 +54,11 @@ from urllib3.util.retry import Retry
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== ১. কনফিগারেশন ====================
-BOT_TOKEN = "AAERGDZGuwwVZ2pHdLxZMQXncyAo"   # আপনার টেলিগ্রাম বট টোকেন
+BOT_TOKEN = "8768727708:AAF62zTgGvjX5TrYQJsR8X1zGZ3yMwuZrMY"   # আপনার টেলিগ্রাম বট টোকেন
 KEY_FILE = "gemini_key.txt"
 
 # 👑 আপনার টেলিগ্রাম আইডি
-ADMIN_IDS = [6847281928]                      
+ADMIN_IDS = [6805684286]                      
 
 COOLDOWN_SECONDS = 10                         # সাধারণ মেম্বারদের জন্য ১০ সেকেন্ড কুলডাউন
 USER_LAST_MESSAGE_TIME = {}                   
