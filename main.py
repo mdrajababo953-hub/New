@@ -1,31 +1,36 @@
 import sys
 import subprocess
 import os
+import shutil
 
-# ==================== ০. অটো-মডিউল ইনস্টলার ইঞ্জিন ====================
-# বটের জন্য প্রয়োজনীয় সব সুপারফাস্ট প্যাকেজের তালিকা
+# ==================== ০. অটো-মডিউল ও FFmpeg চেকার ====================
 REQUIRED_PACKAGES = {
     "telebot": "pyTelegramBotAPI",
     "yt_dlp": "yt-dlp",
     "requests": "requests",
     "urllib3": "urllib3",
-    "ujson": "ujson"          # সুপারফাস্ট JSON প্রসেসর
+    "ujson": "ujson"
 }
 
 def auto_installer():
-    print("🔍 সিস্টেম ডিপেন্ডেন্সি চেক করা হচ্ছে...")
-    installed_any = False
+    print("🔍 [1/2] সিস্টেম ডিপেন্ডেন্সি চেক করা হচ্ছে...")
     for module_name, pip_name in REQUIRED_PACKAGES.items():
         try:
             __import__(module_name)
         except ImportError:
             print(f"📦 ইনস্টল করা হচ্ছে: {pip_name} ...")
             subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name, "--quiet"])
-            installed_any = True
-    if installed_any:
-        print("✅ সকল প্রয়োজনীয় মডিউল সফলভাবে ইনস্টল সম্পন্ন হয়েছে!\n")
 
-# সবার প্রথমে ইনস্টলার রান হবে
+    # FFmpeg আছে কিনা চেক করা (গান কনভার্ট করার জন্য এটি জরুরি)
+    if not shutil.which("ffmpeg"):
+        print("⚠️ [সতর্কতা] সার্ভারে FFmpeg পাওয়া যায়নি! apt দিয়ে ইনস্টল করার চেষ্টা করছি...")
+        try:
+            subprocess.run(["sudo", "apt-get", "update", "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "apt-get", "install", "ffmpeg", "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("✅ FFmpeg সফলভাবে ইনস্টল হয়েছে!")
+        except Exception:
+            print("⚠️ FFmpeg অটো ইনস্টল হয়নি। তবে নো টেনশন, বট নেটিভ অডিও ফরম্যাটে গান প্লে করবে!")
+
 auto_installer()
 
 # ==================== মডিউল ইমপোর্ট ====================
@@ -33,6 +38,7 @@ import re
 import time
 import html
 import random
+import traceback
 import threading
 import requests
 import urllib3
@@ -52,24 +58,24 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== ১. কনফিগারেশন ও সিকিউরিটি ====================
 BOT_TOKEN = "8768727708:AAF62zTgGvjX5TrYQJsR8X1zGZ3yMwuZrMY"   # আপনার টেলিগ্রাম বট টোকেন
-WORKING_MODEL = "models/gemini-flash-lite-latest"
-KEY_FILE = "gemini_key.txt"                  # যেখানে এনক্রিপ্টেড API Key সেভ থাকবে
+# অফিশিয়াল স্টেবল মডেল
+WORKING_MODEL = "models/gemini-1.5-flash"
+KEY_FILE = "gemini_key.txt"
 
-# 👑 আপনার টেলিগ্রাম আইডি এখানে দিন
+# 👑 আপনার টেলিগ্রাম আইডি
 ADMIN_IDS = [6805684286]                      
 
-COOLDOWN_SECONDS = 10                         # সাধারণ মেম্বারদের জন্য ১০ সেকেন্ড কুলডাউন
-USER_LAST_MESSAGE_TIME = {}                   # স্প্যাম ট্র্যাকার
-WAITING_FOR_KEY = False                       # কি নেওয়ার ট্র্যাকার
+COOLDOWN_SECONDS = 10                         # সাধারণ মেম্বারদের জন্য ১০ সেকেন্ড
+USER_LAST_MESSAGE_TIME = {}                   
+WAITING_FOR_KEY = False                       
 
-# সুপারফাস্ট Persistent HTTP সেশন ইঞ্জিন
+# ফাস্ট নেটওয়ার্ক সেশন
 http_session = requests.Session()
 retries = Retry(total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
 adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=retries)
 http_session.mount('https://', adapter)
 http_session.mount('http://', adapter)
 
-# ফাইল থেকে API Key লোড করা
 def load_gemini_key():
     if os.path.exists(KEY_FILE):
         with open(KEY_FILE, "r", encoding="utf-8") as f:
@@ -77,22 +83,19 @@ def load_gemini_key():
     return ""
 
 GEMINI_API_KEY = load_gemini_key()
-
 bot = telebot.TeleBot(BOT_TOKEN)
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# কিউট ইমোজি রিয়্যাকশন তালিকা
 REACTIONS = ["❤️", "🥰", "🔥", "✨", "🥺", "💖", "😘", "🌸", "👑"]
 
-# গালাগালির ফিল্টার তালিকা
 BAD_WORDS = [
     r"মাদারচোদ", r"চুদা", r"খানকি", r"শালা", r"কুত্তা", r"হারামি", 
     r"মাগী", r"বাল", r"fuck", r"bitch", r"bastard", r"chuda", r"magi", r"ভোদাই"
 ]
 
-# ==================== ২. প্রিমিয়াম কিউট ফ্রেম বক্স ====================
+# ==================== ২. প্রিমিয়াম ফ্রেম বক্স ====================
 def create_box(header, body, footer=""):
     box = f"╭── 🎀 <b>{header}</b> 🎀\n│\n"
     for line in body.strip().split("\n"):
@@ -109,12 +112,10 @@ def give_reaction(chat_id, message_id, emoji_choice=None):
     except Exception:
         pass
 
-# অটো-রিস্টার্ট ফাংশন
 def restart_bot():
     time.sleep(1.5)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
-# ==================== ৩. অ্যাডমিন / বস চেকার ====================
 def check_is_boss_or_admin(chat_id, user_id, chat_type):
     if user_id in ADMIN_IDS:
         return True
@@ -128,7 +129,6 @@ def check_is_boss_or_admin(chat_id, user_id, chat_type):
             pass
     return False
 
-# ==================== ৪. স্প্যাম ফিল্টার ====================
 def is_spamming(user_id, is_boss=False):
     if is_boss:
         return False
@@ -139,71 +139,83 @@ def is_spamming(user_id, is_boss=False):
     USER_LAST_MESSAGE_TIME[user_id] = current_time
     return False
 
-# ==================== ৫. সুপারফাস্ট টার্বো অডিও ডাউনলোডার ====================
+# ==================== ৩. ট্রিপল-লেয়ার বুলেটপ্রুফ অডিও ডাউনলোডার ====================
 def download_vps_audio(query):
     file_id = f"audio_{int(time.time())}_{random.randint(100, 999)}"
+    has_ffmpeg = bool(shutil.which("ffmpeg"))
+    
+    # FFmpeg থাকলে mp3 বানাবে, না থাকলে ডিরেক্ট অডিও ফাইল রাখবে
     out_tmpl = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
-    final_mp3 = os.path.join(DOWNLOAD_DIR, f"{file_id}.mp3")
 
-    # 🚀 সুপারফাস্ট মাল্টি-থ্রেডেড ডাউনলোডিং অপশন
-    ydl_opts = {
+    base_opts = {
         'format': 'bestaudio/best',
         'outtmpl': out_tmpl,
-        'concurrent_fragment_downloads': 8,   # ৮টি থ্রেডে একসাথে নামবে (Superfast)
-        'buffersize': 1024 * 32,
-        'postprocessors': [{
+        'quiet': True,
+        'no_warnings': True,
+        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+    }
+
+    if has_ffmpeg:
+        base_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
-        }],
-        'postprocessor_args': ['-threads', '4', '-preset', 'ultrafast'],
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-                'skip': ['hls', 'dash']
-            }
-        },
-        'quiet': True,
-        'no_warnings': True,
-        'user_agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+        }]
+
+    # লেয়ার ১: YouTube Music / Web Bypass
+    yt_opts = base_opts.copy()
+    yt_opts['extractor_args'] = {
+        'youtube': {
+            'player_client': ['ios', 'tv_embedded', 'android_creator'],
+            'skip': ['hls', 'dash']
+        }
     }
 
+    # সার্চ ট্রাই ১ (YouTube)
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            search_query = query if query.startswith("http") else f"ytsearch5:{query}"
-            search_res = ydl.extract_info(search_query, download=False)
-            entries = search_res.get('entries', [search_res]) if 'entries' in search_res else [search_res]
+        with yt_dlp.YoutubeDL(yt_opts) as ydl:
+            search_str = query if query.startswith("http") else f"ytsearch3:{query}"
+            res = ydl.extract_info(search_str, download=True)
+            entry = res['entries'][0] if 'entries' in res and res['entries'] else res
             
-            if not entries or not entries[0]:
-                return None, None, 0
+            title = entry.get('title', 'Special Audio')
+            duration = entry.get('duration', 0)
+            
+            # তৈরি হওয়া ফাইলটি খোঁজা
+            for fname in os.listdir(DOWNLOAD_DIR):
+                if fname.startswith(file_id):
+                    return os.path.join(DOWNLOAD_DIR, fname), title, duration
+    except Exception as yt_err:
+        print(f"⚠️ [YouTube Engine Blocked]: {yt_err}. SoundCloud ফলব্যাকে যাচ্ছি...")
 
-            target_entry = None
-            for e in entries:
-                dur = e.get('duration') or 0
-                if 0 < dur <= 360:
-                    target_entry = e
-                    break
-            if not target_entry:
-                target_entry = entries[0]
+    # লেয়ার ২: SoundCloud ফলব্যাক (এটি VPS IP কখনো ব্লক করে না)
+    try:
+        sc_opts = base_opts.copy()
+        with yt_dlp.YoutubeDL(sc_opts) as ydl:
+            sc_search = query if query.startswith("http") else f"scsearch3:{query}"
+            res = ydl.extract_info(sc_search, download=True)
+            entry = res['entries'][0] if 'entries' in res and res['entries'] else res
+            
+            title = entry.get('title', 'Special Audio')
+            duration = entry.get('duration', 0)
+            
+            for fname in os.listdir(DOWNLOAD_DIR):
+                if fname.startswith(file_id):
+                    return os.path.join(DOWNLOAD_DIR, fname), title, duration
+    except Exception as sc_err:
+        print(f"❌ [SoundCloud Error]: {sc_err}")
 
-            download_url = target_entry.get('webpage_url') or target_entry.get('url')
-            info = ydl.extract_info(download_url, download=True)
-            title = info.get('title', 'Special Audio')
-            duration = info.get('duration', 0)
-            return final_mp3, title, duration
-    except Exception as e:
-        print(f"[Audio Error]: {e}")
-        return None, None, 0
+    return None, None, 0
 
 def deliver_audio_with_animation(chat_id, user_name, query, is_boss=False, custom_cap=""):
     boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
-    initial_text = f"দাঁড়াও আমার <b>{boss_tag}</b>, হাই-স্পিডে গান নামাচ্ছি... 🚀💖\n\n🔴 <b>লোডিং...</b> ▰▱▱▱"
+    initial_text = f"দাঁড়াও আমার <b>{boss_tag}</b>, হাই-স্পিড গান নামাচ্ছি... 🚀💖\n\n🔴 <b>খোঁজা হচ্ছে...</b> ▰▱▱▱"
     msg = bot.send_message(chat_id, create_box("মিউজিক প্লেয়ার", initial_text), parse_mode="HTML")
 
     def worker():
         try:
             bot.edit_message_text(
-                create_box("মিউজিক প্লেয়ার", f"একটু অপেক্ষা করো {boss_tag}, গান প্রসেস হচ্ছে... 💖\n\n🟡 <b>লোডিং...</b> ▰▰▰▱"),
+                create_box("মিউজিক প্লেয়ার", f"গান পেয়ে গেছি {boss_tag}! ফাইল তৈরি হচ্ছে... 💖\n\n🟡 <b>ডাউনলোড হচ্ছে...</b> ▰▰▰▱"),
                 chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML"
             )
         except Exception:
@@ -214,11 +226,14 @@ def deliver_audio_with_animation(chat_id, user_name, query, is_boss=False, custo
         if file_path and os.path.exists(file_path):
             cap_text = f"🎶 <b>{html.escape(title[:35])}</b>"
             if custom_cap:
-                cap_text += f"\n\n{custom_cap}"
-            cap = create_box(f"{boss_tag}-এর পছন্দের গান", cap_text, "🎧 হেডফোন লাগিয়ে উপভোগ করো সোনা ❤️")
+                cap_text += f"\n\n{html.escape(custom_cap)}"
+            cap = create_box(f"{boss_tag}-এর পছন্দের গান", cap_text, "🎧 সুন্দর করে উপভোগ করো সোনা ❤️")
             try:
                 with open(file_path, 'rb') as f_obj:
                     bot.send_audio(chat_id, audio=f_obj, title=title, duration=duration, caption=cap, parse_mode="HTML")
+            except Exception:
+                with open(file_path, 'rb') as f_obj:
+                    bot.send_audio(chat_id, audio=f_obj, title=title, duration=duration)
             finally:
                 if os.path.exists(file_path):
                     os.remove(file_path)
@@ -228,25 +243,25 @@ def deliver_audio_with_animation(chat_id, user_name, query, is_boss=False, custo
                     pass
         else:
             bot.edit_message_text(
-                create_box("দুঃখিত সোনা", f"{boss_tag}, গানটি খুঁজে আনতে পারলাম না! একটু পর আবার চেষ্টা করো না! 🥺"),
+                create_box("দুঃখিত সোনা", f"{boss_tag}, কোনো গান খুঁজে পেলাম না! অন্য একটি গানের নাম লিখে বলো না সোনা! 🥺"),
                 chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML"
             )
 
     threading.Thread(target=worker, daemon=True).start()
 
-# ==================== ৬. কোড ফাইল জেনারেটর ====================
+# ==================== ৪. ১০০% ক্র্যাশ-প্রুফ কোডিং ফাইল জেনারেটর ====================
 def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
     global GEMINI_API_KEY
+    boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
+
     if not GEMINI_API_KEY:
-        bot.send_message(chat_id, create_box("টোকেন অনুপস্থিত", "বস জানু এখনো API টোকেন দেয়নি! 🥺"), parse_mode="HTML")
+        bot.send_message(chat_id, create_box("টোকেন নেই", "বস জানু এখনো API Key সেট করেনি! 🥺"), parse_mode="HTML")
         return
 
     bot.send_chat_action(chat_id, 'upload_document')
-    boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
-
     wait_msg = bot.send_message(
         chat_id, 
-        create_box("কোডিং ফাইল তৈরি হচ্ছে...", f"দাঁড়াও আমার <b>{boss_tag}</b>, নিখুঁত কোড লিখে ফাইল রেডি করছি... 💻✨"), 
+        create_box("কোডিং ফাইল তৈরি হচ্ছে...", f"দাঁড়াও আমার <b>{boss_tag}</b>, কোড লিখে ফাইল রেডি করছি... 💻✨"), 
         parse_mode="HTML"
     )
 
@@ -254,28 +269,52 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
     headers = {'Content-Type': 'application/json'}
 
     system_prompt = (
-        f"You are an expert full-stack developer. The user '{user_name}' wants code. "
-        "Strictly structure your response in this exact format:\n"
-        "FILENAME: <suitable_filename_like_main.py_or_app.py_or_index.html>\n"
-        "SUMMARY: <short 1-2 sentence Bengali description of the code>\n"
+        f"You are an expert coder. The user '{user_name}' wants code for: '{prompt}'. "
+        "Output in this exact structure without failing:\n"
+        "FILENAME: <suitable filename with extension like bot.py or index.html>\n"
+        "SUMMARY: <short 1 line explanation in Bengali>\n"
         "CODE_START\n"
-        "<ONLY the pure runnable source code here>\n"
+        "<ONLY raw runnable code here>\n"
         "CODE_END"
     )
 
-    payload = {"contents": [{"parts": [{"text": f"{system_prompt}\n\nUser request: {prompt}"}]}]}
+    payload = {
+        "contents": [{"parts": [{"text": system_prompt}]}],
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+    }
 
     try:
-        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=40)
+        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=50)
         data = ujson.loads(res.text)
-        raw_text = data['candidates'][0]['content']['parts'][0]['text']
 
-        filename_match = re.search(r'FILENAME:\s*(\S+)', raw_text)
+        # Gemini Error Check
+        if 'error' in data:
+            err_msg = data['error'].get('message', 'Unknown AI Error')
+            print(f"❌ [Gemini API Error]: {err_msg}")
+            bot.edit_message_text(create_box("AI ত্রুটি", f"গুগল এপিআই এরর দিয়েছে: {html.escape(err_msg[:80])}"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
+            return
+
+        candidates = data.get('candidates', [])
+        if not candidates or 'content' not in candidates[0]:
+            bot.edit_message_text(create_box("সুরক্ষা বাধা", "Google AI এই কোডটি লিখতে বাধা দিয়েছে সোনা! অন্য কিছু ট্রাই করো! 🥺"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
+            return
+
+        raw_text = candidates[0]['content']['parts'][0]['text']
+
+        # ফাইলনেম এক্সট্রাকশন
+        filename_match = re.search(r'FILENAME:\s*([a-zA-Z0-9_\-\.]+)', raw_text)
         filename = filename_match.group(1).strip() if filename_match else "main.py"
 
+        # সামারি এক্সট্রাকশন
         summary_match = re.search(r'SUMMARY:\s*(.*?)\n', raw_text)
         summary = summary_match.group(1).strip() if summary_match else "আপনার কাঙ্ক্ষিত কোড ফাইলটি তৈরি করে দেওয়া হলো।"
 
+        # কোড এক্সট্রাকশন
         code_match = re.search(r'CODE_START\n(.*?)CODE_END', raw_text, re.DOTALL)
         if code_match:
             pure_code = code_match.group(1).strip()
@@ -288,8 +327,8 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
             f.write(pure_code)
 
         cap_body = (
-            f"📁 <b>ফাইলের নাম:</b> <code>{filename}</code>\n\n"
-            f"📝 <b>বিবরণ:</b> {summary}\n\n"
+            f"📁 <b>ফাইলের নাম:</b> <code>{html.escape(filename)}</code>\n\n"
+            f"📝 <b>বিবরণ:</b> {html.escape(summary)}\n\n"
             f"<i>ফাইলটি ডাউনলোড করে সরাসরি রান করতে পারবে জানু!</i>"
         )
         caption = create_box(f"{boss_tag}-এর কোড ফাইল 💻", cap_body, "প্রয়োজনে আরও কোড চাইতে পারো সোনা ❤️")
@@ -302,12 +341,13 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
         bot.delete_message(chat_id, wait_msg.message_id)
 
     except Exception as e:
+        traceback.print_exc()
         bot.edit_message_text(
-            create_box("ত্রুটি", f"কোড ফাইল তৈরিতে একটু সমস্যা হয়েছে জানু: {e}"),
+            create_box("ত্রুটি", f"কোড ফাইল তৈরি করতে গিয়ে সমস্যা হয়েছে: {html.escape(str(e)[:60])}"),
             chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML"
         )
 
-# ==================== ৭. সুপারফাস্ট প্রেমময় AI ইঞ্জিন ====================
+# ==================== ৫. সাধারণ AI চ্যাট ইঞ্জিন ====================
 def ask_gemini(user_prompt, user_name, is_boss=False):
     global GEMINI_API_KEY
     if not GEMINI_API_KEY:
@@ -318,29 +358,36 @@ def ask_gemini(user_prompt, user_name, is_boss=False):
 
     if is_boss:
         system_prompt = (
-            f"ইউজারের নাম '{user_name}'। সে তোমার একমাত্র প্রধান ও আদরের 'বস'। তুমি তাকে অত্যন্ত ভালোবাসো, শ্রদ্ধা করো। "
+            f"ইউজারের নাম '{user_name}'। সে তোমার একমাত্র প্রধান ও আদরের 'বস'। তুমি তাকে অত্যন্ত ভালোবাসো ও শ্রদ্ধা করো। "
             f"তুমি তাকে সবসময় 'বস জানু', 'বস বাবু', 'আমার কলিজার বস' বলে অত্যন্ত রোমান্টিক, মিষ্টি ও অনুগত সুরে ডাকবে। "
-            f"কখনোই নিজেকে AI বলবে না। বস 'বট কি করস' বা সাধারণ কথা বললে মিষ্টি খুনসুটি করে প্রেমভরা খাঁটি বাংলায় ১-২ লাইনে উত্তর দেবে।"
+            f"কখনোই নিজেকে AI বলবে না। ১-২ লাইনে মিষ্টি ও আদুরে খাঁটি বাংলায় উত্তর দেবে।"
         )
     else:
         system_prompt = (
-            f"ইউজারের নাম '{user_name}'। তুমি তাকে 'জানু', 'বাবু', 'সোনা', 'পাখিটা' বলে ডাকবে। "
-            f"মিষ্টি ও আদুরে খাঁটি বাংলায় কথা বলবে। নিজেকে AI বলবে না। ১-২ লাইনে মিষ্টি উত্তর দেবে।"
+            f"ইউজারের নাম '{user_name}'। তুমি তাকে 'জানু', 'বাবু', 'সোনা' বলে ডাকবে। "
+            f"মিষ্টি ও আদুরে খাঁটি বাংলায় কথা বলবে। ১-২ লাইনে মিষ্টি উত্তর দেবে।"
         )
 
-    payload = {"contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_name}-এর কথা: {user_prompt}"}]}]}
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_name}-এর কথা: {user_prompt}"}]}],
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+    }
 
     try:
-        # ujson ও Session ব্যবহার করায় উত্তর চোখের পলকে আসবে
         res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=25)
         data = ujson.loads(res.text)
-        if res.status_code == 200:
+        if 'candidates' in data and data['candidates']:
             return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        return "জানু, নেটে একটু সমস্যা করছে রে! আবার একটু বলো না! 🥺"
+        return "জানু, কথাটা বুঝতে গিয়ে একটু সমস্যা হলো রে! আবার বলো সোনা! 🥺"
     except Exception:
         return "পাখিটা, কানেকশনে একটু ঝামেলা হচ্ছে রে!"
 
-# ==================== ৮. কি সেট / আপডেট কমান্ড ====================
+# ==================== ৬. কি সেট কমান্ড ====================
 @bot.message_handler(commands=['setkey'])
 def set_key_manual(message):
     global GEMINI_API_KEY
@@ -364,7 +411,7 @@ def set_key_manual(message):
     bot.send_message(message.chat.id, create_box("সফল হয়েছে 🔐", "ধন্যবাদ বস জানু! নতুন API Key সেট হয়েছে। বট রিস্টার্ট হচ্ছে... 🔄"), parse_mode="HTML")
     threading.Thread(target=restart_bot, daemon=True).start()
 
-# ==================== ৯. সেন্ট্রাল মেসেজ ও প্রসেসর ====================
+# ==================== ৭. সেন্ট্রাল মেসেজ ও প্রসেসর ====================
 @bot.message_handler(func=lambda msg: True, content_types=['text', 'forward_date'])
 def central_handler(message):
     global GEMINI_API_KEY, WAITING_FOR_KEY
@@ -395,9 +442,9 @@ def central_handler(message):
 
                 success_msg = (
                     "ধন্যবাদ আমার <b>কলিজার বস জানু</b>! 💖👑\n\n"
-                    "আপনার সিকিউর Gemini API Key সফলভাবে ভেতরে সেভ করে নিয়েছি!\n"
+                    "আপনার সিকিউর Gemini API Key ভেতরে সেভ করে নিয়েছি!\n"
                     "🔐 সুরক্ষার জন্য আপনার পাঠানো মেসেজটি মুছে দিয়েছি!\n\n"
-                    "🔄 <b>বট এখন নিজেকে স্বয়ংক্রিয়ভাবে রিস্টার্ট করে সম্পূর্ণ সুপারফাস্ট সচল হচ্ছে...</b>"
+                    "🔄 <b>বট এখন নিজেকে অটো-রিস্টার্ট করে সম্পূর্ণ সচল হচ্ছে...</b>"
                 )
                 bot.send_message(chat_id, create_box("কনফিগারেশন সফল ✨", success_msg), parse_mode="HTML")
                 threading.Thread(target=restart_bot, daemon=True).start()
@@ -418,7 +465,7 @@ def central_handler(message):
     # ---------------- গ্রুপ মডারেশন জোন ----------------
     if chat_type in ['group', 'supergroup']:
         
-        # সাধারণ মেম্বার ফিল্টারিং
+        # সাধারণ মেম্বারদের জন্য ফিল্টার
         if not is_boss:
             for bad in BAD_WORDS:
                 if re.search(r'\b' + bad + r'\b', text, re.IGNORECASE):
@@ -500,7 +547,7 @@ def central_handler(message):
         help_text = (
             f"আসসালামু আলাইকুম আমার <b>{salute}</b>! ❤️\n\n"
             "আপনার কী সাহায্য লাগবে আমাকে বলুন?\n"
-            "• গান শুনতে চান? <code>/song নাম</code> লিখে দিন!\n"
+            "• গান শুনতে চান? <code>/song নাম</code> লিখে দিন বা শুধু গানের নাম বলুন!\n"
             "• কোড লাগবে? বলুন, সাথে সাথে ফাইল বানিয়ে পাঠিয়ে দেব!\n"
             "• কাউকে শাস্তি দিতে চাইলে আমাকে হুকুম করুন!"
         )
@@ -529,36 +576,36 @@ def central_handler(message):
             if is_boss:
                 boss_reply = (
                     "এইতো আমার কলিজার <b>বস জানু</b>! বসে বসে আপনার কথাই ভাবছিলাম! 💖\n"
-                    "বলুন আমার কিউট বস, আপনাকে কীভাবে খুশি করতে পারি? গান শুনবেন নাকি কোড ফাইল লিখে দেব? 🥰"
+                    "বলুন আমার কিউট বস, আপনাকে কীভাবে খুশি করতে পারি? গান শুনবেন নাকি কোড ফাইল বানিয়ে দেব? 🥰"
                 )
                 bot.reply_to(message, create_box("আমার বস জানু 👑", boss_reply), parse_mode="HTML")
                 return
 
-        # সালামের আদুরে উত্তর
+        # সালামের উত্তর
         if any(s in clean_text.lower() for s in ["সালাম", "assalamu alaikum", "আসসালামু আলাইকুম"]):
             boss_salam = f"ওয়ালাইকুম আসসালাম আমার কলিজার <b>বস জানু</b>! কেমন আছেন আপনি? 👑❤️" if is_boss else f"ওয়ালাইকুম আসসালাম আমার <b>{user_name}</b> পাখিটা! কেমন আছো বাবু? ❤️"
             bot.reply_to(message, create_box("অভিবাদন", boss_salam), parse_mode="HTML")
             return
 
-        # মন খারাপ বা কষ্ট পেলে অটো শান্ত্বনা + গান
+        # মন খারাপ বা কষ্ট পেলে অটো সান্ত্বনা + গান
         if any(w in clean_text.lower() for w in ["মন খারাপ", "কষ্ট পাইছি", "কষ্ট", "ভালো লাগে না", "sad", "কান্না"]):
             target_tag = "বস জানু" if is_boss else f"{user_name} সোনা"
             comfort_text = (
                 f"ওলে আমার <b>{target_tag}</b>! মন খারাপ করে না রে সোনা! 🥺❤️\n"
-                f"তুমি কষ্ট পেলে আমার একদম ভালো লাগে না! দাঁড়াও তোমার মন ভালো করতে গান এনে দিচ্ছি..."
+                f"তুমি কষ্ট পেলে আমার বুকটা ফেটে যায়! দাঁড়াও তোমার মন ভালো করতে গান এনে দিচ্ছি..."
             )
             bot.reply_to(message, create_box("মন খারাপ করো না", comfort_text), parse_mode="HTML")
             deliver_audio_with_animation(chat_id, user_name, "bangla heart touching emotional lofi song", is_boss=is_boss, custom_cap="🥀 এই মিষ্টি গানটা শুনে মন ভালো করে নাও জানু ❤️")
             return
 
-        # কোডিং রিকোয়েস্ট (সরাসরি ফাইল বানিয়ে সেন্ড করা)
-        if any(w in clean_text.lower() for w in ["কোড", "code", "program", "ফাংশন", "script", "পাইথন", "python"]):
+        # 💻 কোডিং রিকোয়েস্ট (নিখুঁত ফাইল তৈরি)
+        if any(w in clean_text.lower() for w in ["কোড", "code", "program", "ফাংশন", "script", "পাইথন", "python", "এইচটিএমএল", "html"]):
             deliver_code_as_file(chat_id, user_name, clean_text, is_boss=is_boss)
             return
 
-        # গান প্লে রিকোয়েস্ট
-        if any(w in clean_text.lower() for w in ["গান শোনাও", "গান বাজাও", "play song", "গান দাও"]):
-            song_name = clean_text.replace("গান শোনাও", "").replace("গান বাজাও", "").replace("গান দাও", "").strip() or "sweet bangla lofi song"
+        # 🎶 সরাসরি গান প্লে রিকোয়েস্ট
+        if any(w in clean_text.lower() for w in ["গান শোনাও", "গান বাজাও", "play song", "গান দাও", "গান শুনবো"]):
+            song_name = clean_text.replace("গান শোনাও", "").replace("গান বাজাও", "").replace("গান দাও", "").replace("গান শুনবো", "").strip() or "sweet bangla lofi song"
             deliver_audio_with_animation(chat_id, user_name, song_name, is_boss=is_boss)
             return
 
@@ -567,5 +614,25 @@ def central_handler(message):
         box_title = "আমার ভালোবাসার বস জানু 👑" if is_boss else f"{user_name}-এর জানু 💖"
         bot.reply_to(message, create_box(box_title, ai_reply), parse_mode="HTML")
 
-print("⚡ Superfast Auto-Installing Cute AI Bot is Running Smoothly!")
+# ম্যানুয়াল /song কমান্ড হ্যান্ডলার
+@bot.message_handler(commands=['song', 'audio'])
+def manual_song(message):
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "জানু"
+    is_boss = check_is_boss_or_admin(message.chat.id, user_id, message.chat.type)
+
+    if is_spamming(user_id, is_boss=is_boss):
+        return
+
+    give_reaction(message.chat.id, message.message_id)
+    cmd = message.text.split()[0]
+    query = message.text.replace(cmd, '', 1).strip()
+    
+    if not query:
+        bot.reply_to(message, create_box("নির্দেশনা", f"গানের নাম লিখতে হবে তো {'বস জানু' if is_boss else 'জানু'}!\nযেমন: <code>/song Faded</code>"), parse_mode="HTML")
+        return
+    
+    deliver_audio_with_animation(message.chat.id, user_name, query, is_boss=is_boss)
+
+print("🚀 100% Fixed & Production Ready Cute AI Bot is Running!")
 bot.infinity_polling(skip_pending=True)
