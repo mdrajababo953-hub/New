@@ -3,7 +3,7 @@ import subprocess
 import os
 import shutil
 
-# ==================== ০. অটো-ইনস্টলার ও FFmpeg চেকার ====================
+# ==================== ০. ডিপেন্ডেন্সি অটো-ইনস্টলার ====================
 REQUIRED_PACKAGES = {
     "telebot": "pyTelegramBotAPI",
     "yt_dlp": "yt-dlp",
@@ -13,12 +13,10 @@ REQUIRED_PACKAGES = {
 }
 
 def auto_installer():
-    print("🔍 ডিপেন্ডেন্সি ও প্যাকেজ যাচাই করা হচ্ছে...")
     for module_name, pip_name in REQUIRED_PACKAGES.items():
         try:
             __import__(module_name)
         except ImportError:
-            print(f"📦 ইনস্টল করা হচ্ছে: {pip_name} ...")
             subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name, "--quiet"])
 
     if not shutil.which("ffmpeg"):
@@ -35,7 +33,6 @@ import re
 import time
 import html
 import random
-import traceback
 import threading
 import requests
 import urllib3
@@ -60,7 +57,7 @@ KEY_FILE = "gemini_key.txt"
 # 👑 আপনার টেলিগ্রাম আইডি
 ADMIN_IDS = [6805684286]                      
 
-COOLDOWN_SECONDS = 10                         # সাধারণ মেম্বারদের জন্য ১০ সেকেন্ড কুলডাউন
+COOLDOWN_SECONDS = 10                         
 USER_LAST_MESSAGE_TIME = {}                   
 WAITING_FOR_KEY = False                       
 
@@ -78,8 +75,7 @@ def load_gemini_key():
     return ""
 
 GEMINI_API_KEY = load_gemini_key()
-WORKING_MODEL = "models/gemma-4-26b-a4b-it"  # প্রাথমিক ডিফল্ট মডেল
-AVAILABLE_MODELS_CACHE = []
+WORKING_MODEL = None
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -93,73 +89,138 @@ BAD_WORDS = [
     r"মাগী", r"বাল", r"fuck", r"bitch", r"bastard", r"chuda", r"magi", r"ভোদাই"
 ]
 
-# ==================== ২. রিয়েল-টাইম সেলফ-হিলিং AI ইঞ্জিন ====================
-def fetch_available_models():
-    global AVAILABLE_MODELS_CACHE, GEMINI_API_KEY
-    if not GEMINI_API_KEY:
-        return []
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
-        res = http_session.get(url, timeout=12)
-        data = ujson.loads(res.text)
-        models = []
-        for m in data.get("models", []):
-            if "generateContent" in m.get("supportedGenerationMethods", []):
-                name = m.get("name", "").replace("models/", "")
-                if "tts" not in name.lower() and "embed" not in name.lower():
-                    models.append(name)
-        AVAILABLE_MODELS_CACHE = models
-        return models
-    except Exception as e:
-        print(f"⚠️ মডেল লিস্ট টানতে ব্যর্থ: {e}")
-        return []
-
-def call_gemini_with_self_healing(payload):
-    """ভবিষ্যতে কোনো মডেলে সমস্যা হলে এটি সাথে সাথে অন্য মডেলে সুইচ করে উত্তর দেবে"""
-    global WORKING_MODEL, GEMINI_API_KEY, AVAILABLE_MODELS_CACHE
-
+# ==================== ২. পারফেক্ট মডেল সিলেক্টর ====================
+def discover_and_lock_model():
+    """সবচেয়ে নির্ভরযোগ্য ও সুন্দর চ্যাট মডেলটি নির্বাচন করে লক করবে"""
+    global GEMINI_API_KEY, WORKING_MODEL
     if not GEMINI_API_KEY:
         return None
 
-    # ১. বর্তমান মডেল দিয়ে চেষ্টা
-    headers = {'Content-Type': 'application/json'}
-    current_url = f"https://generativelanguage.googleapis.com/v1beta/{WORKING_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
     try:
-        res = http_session.post(current_url, data=ujson.dumps(payload), headers=headers, timeout=35)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        res = http_session.get(url, timeout=10)
         data = ujson.loads(res.text)
-        if res.status_code == 200 and 'candidates' in data and data['candidates']:
-            return data
+        
+        raw_models = []
+        for m in data.get("models", []):
+            if "generateContent" in m.get("supportedGenerationMethods", []):
+                raw_models.append(m.get("name", "").replace("models/", ""))
+
+        # 🌟 অগ্রাধিকার তালিকা (Gemini অফিশিয়াল ফ্ল্যাশ মডেল আগে থাকবে)
+        priority_models = [
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemma-4-26b-a4b-it"
+        ]
+
+        ordered_list = []
+        for p in priority_models:
+            if p in raw_models:
+                ordered_list.append(p)
+        for r in raw_models:
+            if r not in ordered_list and "tts" not in r.lower():
+                ordered_list.append(r)
+
+        headers = {"Content-Type": "application/json"}
+        test_payload = {
+            "contents": [{"parts": [{"text": "Hello"}]}],
+            "generationConfig": {"maxOutputTokens": 20}
+        }
+
+        for model_name in ordered_list:
+            test_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+            try:
+                r = http_session.post(test_url, data=ujson.dumps(test_payload), headers=headers, timeout=8)
+                if r.status_code == 200:
+                    WORKING_MODEL = f"models/{model_name}"
+                    print(f"✅ AI ইঞ্জিন সফলভাবে লক হয়েছে: {WORKING_MODEL}")
+                    return WORKING_MODEL
+            except Exception:
+                continue
+
     except Exception:
         pass
 
-    # ২. যদি বর্তমান মডেলে এরর বা সমস্যা হয় -> সেলফ-হিলিং ইঞ্জিন চালু
-    print(f"⚠️ [Self-Healing Engine]: বর্তমান মডেল '{WORKING_MODEL}' কাজ করছে না! নতুন মডেল খোঁজা হচ্ছে...")
+    WORKING_MODEL = "models/gemini-flash-latest"
+    return WORKING_MODEL
+
+# বুট টাইমে সেরা মডেল লক করা
+if GEMINI_API_KEY:
+    discover_and_lock_model()
+
+# ==================== ৩. সেলফ-হিলিং এক্সিকিউটর ====================
+def call_gemini_api(system_prompt, user_prompt):
+    global WORKING_MODEL, GEMINI_API_KEY
+    if not GEMINI_API_KEY:
+        return None
+
+    headers = {'Content-Type': 'application/json'}
     
-    candidate_list = AVAILABLE_MODELS_CACHE or fetch_available_models()
+    # গুগলের অফিশিয়াল স্ট্রাকচার্ড পে-লোড (যা কোনো থিংকিং ড্রাফট লিক করে না)
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {"parts": [{"text": user_prompt}]}
+        ],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 150
+        }
+    }
 
-    for alt_model in candidate_list:
-        if f"models/{alt_model}" == WORKING_MODEL:
-            continue
+    url = f"https://generativelanguage.googleapis.com/v1beta/{WORKING_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    
+    try:
+        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=20)
+        data = ujson.loads(res.text)
+        if res.status_code == 200 and 'candidates' in data and data['candidates']:
+            return data['candidates'][0]['content']['parts'][0]['text']
+    except Exception:
+        pass
 
-        test_url = f"https://generativelanguage.googleapis.com/v1beta/models/{alt_model}:generateContent?key={GEMINI_API_KEY}"
-        try:
-            r = http_session.post(test_url, data=ujson.dumps(payload), headers=headers, timeout=25)
-            r_data = ujson.loads(r.text)
-            if r.status_code == 200 and 'candidates' in r_data and r_data['candidates']:
-                WORKING_MODEL = f"models/{alt_model}"
-                print(f"🎉 [সফল রিকভারি!]: নতুন সক্রিয় মডেল নির্ধারণ করা হয়েছে -> {WORKING_MODEL}")
-                return r_data
-        except Exception:
-            continue
+    # মডেল ফেইল করলে ব্যাকগ্রাউন্ডে স্বয়ংক্রিয় সেলফ-হিলিং
+    discover_and_lock_model()
+    retry_url = f"https://generativelanguage.googleapis.com/v1beta/{WORKING_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    try:
+        res2 = http_session.post(retry_url, data=ujson.dumps(payload), headers=headers, timeout=20)
+        data2 = ujson.loads(res2.text)
+        if res2.status_code == 200 and 'candidates' in data2 and data2['candidates']:
+            return data2['candidates'][0]['content']['parts'][0]['text']
+    except Exception:
+        pass
 
     return None
 
-# বুট টাইমে ব্যাকগ্রাউন্ডে মডেল লিস্ট ক্যাশ করে রাখা
-if GEMINI_API_KEY:
-    threading.Thread(target=fetch_available_models, daemon=True).start()
+# ড্রাফট ফিল্টার ও পিওর বাংলা এক্সট্রাক্টর
+def clean_final_reply(raw_text):
+    if not raw_text:
+        return "জানু, কথাটা ঠিকমতো ধরতে পারিনি রে! আবার বলো সোনা! 🥺"
 
-# ==================== ৩. প্রিমিয়াম ফ্রেম বক্স ও রিস্টার্ট ====================
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    
+    # অপ্রয়োজনীয় ড্রাফট, ইনপুট, কনস্ট্রেইন্ট বা থিংকিং লাইন বাদ দেওয়া
+    pure_bangla_lines = []
+    for l in lines:
+        if l.startswith(('*', 'Draft', 'Input', 'User', 'Constraint', 'Refined', 'Tone', '1.', '2.', '3.')):
+            continue
+        # বাংলা লেখা আছে কিনা যাচাই
+        if re.search(r'[\u0980-\u09FF]', l):
+            pure_bangla_lines.append(l)
+
+    if pure_bangla_lines:
+        final_answer = pure_bangla_lines[-1]
+    else:
+        final_answer = lines[-1]
+
+    # কোটেশন এবং অপ্রয়োজনীয় চিহ্ন পরিষ্কার করা
+    return final_answer.strip('* "\'')
+
+# ==================== ৪. প্রিমিয়াম বক্স ফ্রেম ====================
 def create_box(header, body, footer=""):
     box = f"╭── 🎀 <b>{header}</b> 🎀\n│\n"
     for line in body.strip().split("\n"):
@@ -203,7 +264,7 @@ def is_spamming(user_id, is_boss=False):
     USER_LAST_MESSAGE_TIME[user_id] = current_time
     return False
 
-# ==================== ৪. ট্রিপল-লেয়ার বুলেটপ্রুফ অডিও ডাউনলোডার ====================
+# ==================== ৫. ট্রিপল-লেয়ার অডিও ডাউনলোডার ====================
 def download_vps_audio(query):
     file_id = f"audio_{int(time.time())}_{random.randint(100, 999)}"
     has_ffmpeg = bool(shutil.which("ffmpeg"))
@@ -227,10 +288,7 @@ def download_vps_audio(query):
     # লেয়ার ১: YouTube
     yt_opts = base_opts.copy()
     yt_opts['extractor_args'] = {
-        'youtube': {
-            'player_client': ['ios', 'tv_embedded', 'android_creator'],
-            'skip': ['hls', 'dash']
-        }
+        'youtube': {'player_client': ['ios', 'tv_embedded', 'android_creator'], 'skip': ['hls', 'dash']}
     }
 
     try:
@@ -244,10 +302,10 @@ def download_vps_audio(query):
             for fname in os.listdir(DOWNLOAD_DIR):
                 if fname.startswith(file_id):
                     return os.path.join(DOWNLOAD_DIR, fname), title, duration
-    except Exception as yt_err:
-        print(f"⚠️ [YouTube Blocked]: {yt_err}. SoundCloud ব্যাকআপে যাচ্ছি...")
+    except Exception:
+        pass
 
-    # লেয়ার ২: SoundCloud (VPS-এ ১০০% আনব্লকড)
+    # লেয়ার ২: SoundCloud (VPS-এ সবসময় আনব্লকড)
     try:
         sc_opts = base_opts.copy()
         with yt_dlp.YoutubeDL(sc_opts) as ydl:
@@ -260,14 +318,14 @@ def download_vps_audio(query):
             for fname in os.listdir(DOWNLOAD_DIR):
                 if fname.startswith(file_id):
                     return os.path.join(DOWNLOAD_DIR, fname), title, duration
-    except Exception as sc_err:
-        print(f"❌ [SoundCloud Error]: {sc_err}")
+    except Exception:
+        pass
 
     return None, None, 0
 
 def deliver_audio_with_animation(chat_id, user_name, query, is_boss=False, custom_cap=""):
     boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
-    initial_text = f"দাঁড়াও আমার <b>{boss_tag}</b>, হাই-স্পিড গান নামাচ্ছি... 🚀💖\n\n🔴 <b>খোঁজা হচ্ছে...</b> ▰▱▱▱"
+    initial_text = f"দাঁড়াও আমার <b>{boss_tag}</b>, গান নামাচ্ছি... 🚀💖\n\n🔴 <b>খোঁজা হচ্ছে...</b> ▰▱▱▱"
     msg = bot.send_message(chat_id, create_box("মিউজিক প্লেয়ার", initial_text), parse_mode="HTML")
 
     def worker():
@@ -301,20 +359,15 @@ def deliver_audio_with_animation(chat_id, user_name, query, is_boss=False, custo
                     pass
         else:
             bot.edit_message_text(
-                create_box("দুঃখিত সোনা", f"{boss_tag}, কোনো গান খুঁজে পেলাম না! অন্য একটি গানের নাম লিখে বলো না সোনা! 🥺"),
+                create_box("দুঃখিত সোনা", f"{boss_tag}, কোনো গান খুঁজে পেলাম না! অন্য একটি গানের নাম লিখে বলো সোনা! 🥺"),
                 chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML"
             )
 
     threading.Thread(target=worker, daemon=True).start()
 
-# ==================== ৫. কোডিং ফাইল জেনারেটর ====================
+# ==================== ৬. কোডিং ফাইল জেনারেটর ====================
 def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
     boss_tag = "বস জানু" if is_boss else f"{user_name} জানু"
-
-    if not GEMINI_API_KEY:
-        bot.send_message(chat_id, create_box("টোকেন নেই", "API Key সক্রিয় নেই! 🥺"), parse_mode="HTML")
-        return
-
     bot.send_chat_action(chat_id, 'upload_document')
     wait_msg = bot.send_message(
         chat_id, 
@@ -322,47 +375,25 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
         parse_mode="HTML"
     )
 
-    system_prompt = (
-        f"You are an expert coder. Write pure, complete runnable code for: '{prompt}'. "
-        "Strictly output in this format:\n"
-        "FILENAME: <filename.ext>\n"
-        "SUMMARY: <short 1 line in Bengali>\n"
-        "CODE_START\n"
-        "<ONLY runnable source code>\n"
-        "CODE_END"
-    )
+    sys_prompt = "You are an expert coder. Write pure, complete runnable source code. Structure: FILENAME: <name.ext>\nSUMMARY: <1 line in Bengali>\nCODE_START\n<pure code>\nCODE_END"
+    raw_response = call_gemini_api(sys_prompt, prompt)
 
-    payload = {
-        "contents": [{"parts": [{"text": system_prompt}]}],
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-        ]
-    }
+    if not raw_response:
+        bot.edit_message_text(create_box("ত্রুটি", "কোড তৈরি করতে সমস্যা হয়েছে সোনা! 🥺"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
+        return
 
     try:
-        # সেলফ-হিলিং ফাংশনের মাধ্যমে কল করা
-        data = call_gemini_with_self_healing(payload)
-
-        if not data or 'candidates' not in data:
-            bot.edit_message_text(create_box("ত্রুটি", "Google AI এই কোডটি লিখতে বাধা দিয়েছে সোনা! অন্য কিছু ট্রাই করো! 🥺"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
-            return
-
-        raw_text = data['candidates'][0]['content']['parts'][0]['text']
-
-        filename_match = re.search(r'FILENAME:\s*([a-zA-Z0-9_\-\.]+)', raw_text)
+        filename_match = re.search(r'FILENAME:\s*([a-zA-Z0-9_\-\.]+)', raw_response)
         filename = filename_match.group(1).strip() if filename_match else "main.py"
 
-        summary_match = re.search(r'SUMMARY:\s*(.*?)\n', raw_text)
-        summary = summary_match.group(1).strip() if summary_match else "আপনার কাঙ্ক্ষিত কোড ফাইলটি তৈরি করে দেওয়া হলো।"
+        summary_match = re.search(r'SUMMARY:\s*(.*?)\n', raw_response)
+        summary = summary_match.group(1).strip() if summary_match else "আপনার কাঙ্ক্ষিত কোড ফাইল।"
 
-        code_match = re.search(r'CODE_START\n(.*?)CODE_END', raw_text, re.DOTALL)
+        code_match = re.search(r'CODE_START\n(.*?)CODE_END', raw_response, re.DOTALL)
         if code_match:
             pure_code = code_match.group(1).strip()
         else:
-            pure_code = re.sub(r'FILENAME:.*?\n|SUMMARY:.*?\n', '', raw_text).strip()
+            pure_code = re.sub(r'FILENAME:.*?\n|SUMMARY:.*?\n', '', raw_response).strip()
             pure_code = re.sub(r'^```[a-zA-Z]*\n|```$', '', pure_code, flags=re.MULTILINE).strip()
 
         file_path = os.path.join(DOWNLOAD_DIR, filename)
@@ -383,40 +414,27 @@ def deliver_code_as_file(chat_id, user_name, prompt, is_boss=False):
             os.remove(file_path)
         bot.delete_message(chat_id, wait_msg.message_id)
 
-    except Exception as e:
-        traceback.print_exc()
-        bot.edit_message_text(
-            create_box("ত্রুটি", f"কোড ফাইল তৈরিতে সমস্যা হয়েছে: {html.escape(str(e)[:60])}"),
-            chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML"
+    except Exception:
+        bot.edit_message_text(create_box("ত্রুটি", "ফাইল তৈরিতে সমস্যা হয়েছে জানু!"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
+
+# ==================== ৭. মিষ্টি AI চ্যাট ইঞ্জিন ====================
+def ask_gemini(user_prompt, user_name, is_boss=False):
+    if is_boss:
+        sys_prompt = (
+            f"ইউজারের নাম '{user_name}'। সে তোমার আসল 'বস'। তুমি তাকে অত্যন্ত ভালোবাসো ও শ্রদ্ধা করো। "
+            f"তাকে সবসময় 'বস জানু', 'বস বাবু', 'আমার কলিজার বস' বলে অত্যন্ত রোমান্টিক, মিষ্টি ও অনুগত সুরে খাঁটি বাংলায় ১-২ লাইনে উত্তর দেবে। "
+            f"কোনো থিংকিং, ড্রাফট বা ব্যাখ্যা লিখবে না। শুধুমাত্র সরাসরি মিষ্টি উত্তর দেবে।"
+        )
+    else:
+        sys_prompt = (
+            f"ইউজারের নাম '{user_name}'। তুমি তাকে 'জানু', 'বাবু', 'সোনা' বলে ডাকবে। "
+            f"মিষ্টি ও আদুরে খাঁটি বাংলায় ১-২ লাইনে সরাসরি উত্তর দেবে। কোনো ড্রাফট বা ব্যাখ্যা দেবে না।"
         )
 
-# ==================== ৬. রোমান্টিক AI চ্যাট ইঞ্জিন ====================
-def clean_ai_response(text):
-    lines = text.strip().split("\n")
-    cleaned = []
-    for line in lines:
-        if line.strip().startswith(("* Input:", "* Constraint", "* Standard", "* Bengali", "* Does it", "1.", "2.", "3.")):
-            continue
-        cleaned.append(line)
-    result = "\n".join(cleaned).strip().strip('"').strip("'")
-    return result if result else text.strip().split("\n")[-1]
+    raw_reply = call_gemini_api(sys_prompt, user_prompt)
+    return clean_final_reply(raw_reply)
 
-def ask_gemini(user_prompt, user_name, is_boss=False):
-    boss_prompt = f"ইউজারের নাম '{user_name}'। সে তোমার আসল 'বস'। তাকে অত্যন্ত ভালোবাসো ও শ্রদ্ধা করো। তাকে সবসময় 'বস জানু', 'বস বাবু', 'আমার কলিজার বস' বলে অত্যন্ত রোমান্টিক, মিষ্টি ও অনুগত সুরে খাঁটি বাংলায় ১-২ লাইনে সরাসরি উত্তর দেবে। কোনো থিংকিং প্রসেস বা ব্যাখ্যা লিখবে না।" if is_boss else f"ইউজারের নাম '{user_name}'। তুমি তাকে 'জানু', 'বাবু', 'সোনা' বলে ডাকবে। মিষ্টি ও আদুরে খাঁটি বাংলায় ১-২ লাইনে সরাসরি উত্তর দেবে।"
-    
-    payload = {
-        "contents": [{"parts": [{"text": f"{boss_prompt}\n\nUser: {user_prompt}\nResponse:"}]}]
-    }
-
-    # সেলফ-হিলিং ইঞ্জিন দিয়ে রেসপন্স নেওয়া
-    data = call_gemini_with_self_healing(payload)
-    if data and 'candidates' in data and data['candidates']:
-        raw_ans = data['candidates'][0]['content']['parts'][0]['text']
-        return clean_ai_response(raw_ans)
-    
-    return "জানু, কথাটা বুঝতে গিয়ে একটু সমস্যা হলো রে! আবার বলো সোনা! 🥺"
-
-# ==================== ৭. কি সেট কমান্ড ====================
+# ==================== ৮. কি সেট কমান্ড ====================
 @bot.message_handler(commands=['setkey'])
 def set_key_manual(message):
     global GEMINI_API_KEY
@@ -440,7 +458,7 @@ def set_key_manual(message):
     bot.send_message(message.chat.id, create_box("সফল হয়েছে 🔐", "ধন্যবাদ বস জানু! নতুন API Key সেট হয়েছে। বট রিস্টার্ট হচ্ছে... 🔄"), parse_mode="HTML")
     threading.Thread(target=restart_bot, daemon=True).start()
 
-# ==================== ৮. সেন্ট্রাল মেসেজ ও প্রসেসর ====================
+# ==================== ৯. সেন্ট্রাল মেসেজ ও প্রসেসর ====================
 @bot.message_handler(func=lambda msg: True, content_types=['text', 'forward_date'])
 def central_handler(message):
     global GEMINI_API_KEY, WAITING_FOR_KEY
@@ -473,7 +491,7 @@ def central_handler(message):
                     "ধন্যবাদ আমার <b>কলিজার বস জানু</b>! 💖👑\n\n"
                     "আপনার সিকিউর Gemini API Key ভেতরে সেভ করে নিয়েছি!\n"
                     "🔐 সুরক্ষার জন্য আপনার পাঠানো মেসেজটি মুছে দিয়েছি!\n\n"
-                    "🔄 <b>বট এখন নিজেকে অটো-রিস্টার্ট করে সেলফ-হিলিং ইঞ্জিন সহ চালু হচ্ছে...</b>"
+                    "🔄 <b>বট এখন নিজেকে অটো-রিস্টার্ট করে সম্পূর্ণ সচল হচ্ছে...</b>"
                 )
                 bot.send_message(chat_id, create_box("কনফিগারেশন সফল ✨", success_msg), parse_mode="HTML")
                 threading.Thread(target=restart_bot, daemon=True).start()
@@ -493,7 +511,6 @@ def central_handler(message):
 
     # ---------------- গ্রুপ মডারেশন জোন ----------------
     if chat_type in ['group', 'supergroup']:
-        
         if not is_boss:
             for bad in BAD_WORDS:
                 if re.search(r'\b' + bad + r'\b', text, re.IGNORECASE):
@@ -512,7 +529,7 @@ def central_handler(message):
                     pass
                 return
 
-        # বস জানু বা অ্যাডমিনের ভয়েস কমান্ড (মিউট / ব্যান / আনব্যান)
+        # অ্যাডমিনের ভয়েস কমান্ড (মিউট / ব্যান / আনব্যান)
         if is_boss and message.reply_to_message:
             target_user = message.reply_to_message.from_user
             target_name = target_user.first_name or "মেম্বার"
@@ -615,7 +632,7 @@ def central_handler(message):
             bot.reply_to(message, create_box("অভিবাদন", boss_salam), parse_mode="HTML")
             return
 
-        # মন খারাপ বা কষ্ট পেলে অটো শান্ত্বনা + গান
+        # মন খারাপ বা কষ্ট পেলে অটো সান্ত্বনা + গান
         if any(w in clean_text.lower() for w in ["মন খারাপ", "কষ্ট পাইছি", "কষ্ট", "ভালো লাগে না", "sad", "কান্না"]):
             target_tag = "বস জানু" if is_boss else f"{user_name} সোনা"
             comfort_text = (
@@ -626,18 +643,18 @@ def central_handler(message):
             deliver_audio_with_animation(chat_id, user_name, "bangla heart touching emotional lofi song", is_boss=is_boss, custom_cap="🥀 এই মিষ্টি গানটা শুনে মন ভালো করে নাও জানু ❤️")
             return
 
-        # 💻 কোডিং রিকোয়েস্ট (নিখুঁত ফাইল তৈরি)
+        # কোডিং রিকোয়েস্ট (ফাইল তৈরি)
         if any(w in clean_text.lower() for w in ["কোড", "code", "program", "ফাংশন", "script", "পাইথন", "python", "এইচটিএমএল", "html"]):
             deliver_code_as_file(chat_id, user_name, clean_text, is_boss=is_boss)
             return
 
-        # 🎶 সরাসরি গান প্লে রিকোয়েস্ট
+        # সরাসরি গান প্লে রিকোয়েস্ট
         if any(w in clean_text.lower() for w in ["গান শোনাও", "গান বাজাও", "play song", "গান দাও", "গান শুনবো"]):
             song_name = clean_text.replace("গান শোনাও", "").replace("গান বাজাও", "").replace("গান দাও", "").replace("গান শুনবো", "").strip() or "sweet bangla lofi song"
             deliver_audio_with_animation(chat_id, user_name, song_name, is_boss=is_boss)
             return
 
-        # সাধারণ মিষ্টি AI আলাপ (সেলফ-হিলিং ইঞ্জিন চালিত)
+        # সাধারণ খাঁটি মিষ্টি AI আলাপ (কোনো থিংকিং ড্রাফট থাকবে না)
         ai_reply = ask_gemini(clean_text, user_name, is_boss=is_boss)
         box_title = "আমার ভালোবাসার বস জানু 👑" if is_boss else f"{user_name}-এর জানু 💖"
         bot.reply_to(message, create_box(box_title, ai_reply), parse_mode="HTML")
@@ -662,5 +679,5 @@ def manual_song(message):
     
     deliver_audio_with_animation(message.chat.id, user_name, query, is_boss=is_boss)
 
-print("🛡️ Self-Healing Auto-Switching Cute AI Bot is Running Successfully!")
+print("💖 Optimized & Pure Bengali Cute AI Bot is Running Smoothly!")
 bot.infinity_polling(skip_pending=True)
