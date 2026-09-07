@@ -51,7 +51,7 @@ from urllib3.util.retry import Retry
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== ১. কনফিগারেশন ও সিকিউরিটি ====================
-BOT_TOKEN = "8338439894:AAEPj9_iSiJDFIiH4Sf58vbcq7bn_wQ2wV8"   # আপনার টেলিগ্রাম বট টোকেন
+BOT_TOKEN = "8768727708:AAF62zTgGvjX5TrYQJsR8X1zGZ3yMwuZrMY"   # আপনার টেলিগ্রাম বট টোকেন
 WORKING_MODEL = "models/gemini-flash-lite-latest"
 KEY_FILE = "gemini_key.txt"                  # যেখানে এনক্রিপ্টেড API Key সেভ থাকবে
 
