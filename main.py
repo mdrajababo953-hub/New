@@ -53,20 +53,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ==================== ১. কনফিগারেশন ====================
 BOT_TOKEN = "8768727708:AAF62zTgGvjX5TrYQJsR8X1zGZ3yMwuZrMY"
 KEY_FILE = "gemini_key.txt"
-WORKING_MODEL = "models/gemini-flash-latest"
+
+# 🛠️ FIX: আগে মডেল "gemini-flash-latest" ব্যবহার হচ্ছিল যেটা ঠিকঠাক উত্তর দিচ্ছিল না।
+# পরীক্ষিত ওয়ার্কিং ভার্সনের মডেলটাই এখানে বসানো হলো।
+WORKING_MODEL = "models/gemini-flash-lite-latest"
 BOT_NAME = "জারা"   # 💖 বটের পরিচয় — সবার আদুরে গার্লফ্রেন্ড "ZARA"
 
-# 👑 এডমিন আইডি (শুধুমাত্র সিকিউরিটি, টোকেন ও মডারেশন কমান্ডের জন্য)
+# 👑 এডমিন আইডি (শুধুমাত্র সিকিউরিটি ও টোকেন দেওয়ার জন্য)
 ADMIN_IDS = [6805684286]
 
-COOLDOWN_SECONDS = 4                          # প্রতি ইউজারের জন্য আলাদা কুলডাউন
+COOLDOWN_SECONDS = 5                          # ফাস্ট রেসপন্সের জন্য ৫ সেকেন্ড
 USER_LAST_MESSAGE_TIME = {}
 WAITING_FOR_KEY = False
 user_link_warnings = {}                       # লিংক ট্র্যাকার
-user_mood_state = {}                          # প্রত্যেক ইউজারের সর্বশেষ মুড মনে রাখার জন্য
-MAX_SONG_SECONDS = 300                         # 🔒 কখনোই ৫ মিনিটের বেশি গান দেওয়া হবে না
+MAX_SONG_SECONDS = 300                        # 🔒 কখনোই ৫ মিনিটের বেশি গান দেওয়া হবে না
 
-# সুপারফাস্ট সেশন
+# সুপারফাস্ট সেশন (কোডিং ফাইল জেনারেটরের জন্য ব্যবহৃত হয়)
 http_session = requests.Session()
 retries = Retry(total=2, backoff_factor=0.2)
 adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=retries)
@@ -80,14 +82,12 @@ def load_gemini_key():
     return ""
 
 GEMINI_API_KEY = load_gemini_key()
-bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # 🛠️ FIX: বটের নিজের তথ্য (id/username) একবারই লোড করে ক্যাশ করে রাখা হচ্ছে।
-# আগে প্রতিটা মেসেজে bot.get_me() কল হতো যেটা হাই-ট্রাফিক গ্রুপে Telegram-এর
-# rate-limit ধরে ফেলত, ফলে অনেক মেম্বারের রিপ্লাই নীরবে হারিয়ে যেত (মূল বাগ)।
+# আগে central_intelligence-এর ভেতরে প্রতিটা মেসেজে bot.get_me() কল হতো, যেটা
+# হাই-ট্রাফিক গ্রুপে rate-limit ধরে ফেলে অনেকের রিপ্লাই হারিয়ে দিত (মূল বাগ)।
 BOT_INFO = bot.get_me()
-BOT_ID = BOT_INFO.id
-BOT_USERNAME = BOT_INFO.username
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -99,22 +99,10 @@ BAD_WORDS = [
     r"মাগী", r"বাল", r"fuck", r"bitch", r"bastard", r"chuda", r"magi", r"ভোদাই"
 ]
 
-# মুড বোঝার জন্য কিওয়ার্ড লিস্ট
-SAD_KEYWORDS = ["মন খারাপ", "কষ্ট পাইছি", "কষ্ট", "ভালো লাগে না", "sad", "কান্না",
-                "মন ভালো নাই", "একা লাগছে", "hurt", "খারাপ লাগছে", "মন ভাল না", "মিস করছি"]
-ANGRY_KEYWORDS = ["রাগ", "বিরক্ত", "angry", "মেজাজ খারাপ", "রাগ লাগছে"]
-HAPPY_KEYWORDS = ["ভালো লাগছে", "খুশি", "মজা", "happy", "great", "সুন্দর দিন", "অসাধারণ"]
-
 FUNNY_TRACKS = [
     "funny viral meme song bangla short",
     "trending funny audio status",
     "chill upbeat lofi song 30s"
-]
-
-SAD_TRACKS = [
-    "bangla heart touching sad lofi song",
-    "emotional bangla sad song acoustic",
-    "bangla sad song short"
 ]
 
 # ==================== ২. প্রিমিয়াম কিউট বক্স ফ্রেম ====================
@@ -126,14 +114,6 @@ def create_box(header, body, footer=""):
         box += f"├── <i>{footer}</i>\n"
     box += "╰───────────────────────────"
     return box
-
-def format_duration(seconds):
-    try:
-        seconds = int(seconds)
-        m, s = divmod(seconds, 60)
-        return f"{m}:{s:02d}"
-    except Exception:
-        return "N/A"
 
 def give_reaction(chat_id, message_id, emoji_choice=None):
     try:
@@ -157,17 +137,7 @@ def is_spamming(user_id):
     USER_LAST_MESSAGE_TIME[user_id] = now
     return False
 
-def detect_mood(text):
-    t = text.lower()
-    if any(w in t for w in SAD_KEYWORDS):
-        return "sad"
-    if any(w in t for w in ANGRY_KEYWORDS):
-        return "angry"
-    if any(w in t for w in HAPPY_KEYWORDS):
-        return "happy"
-    return "neutral"
-
-# ==================== ৩. টার্বো অডিও ডাউনলোডার (৫ মিনিট লিমিট সহ) ====================
+# ==================== ৩. ফিক্সড টার্বো অডিও ডাউনলোডার (৫ মিনিট লিমিট সহ) ====================
 def _pick_candidate(ydl, search_str, max_duration):
     """সার্চ রেজাল্ট থেকে max_duration সেকেন্ডের নিচে সেরা ক্যান্ডিডেট বেছে নেয়।"""
     try:
@@ -180,12 +150,9 @@ def _pick_candidate(ydl, search_str, max_duration):
     entries = [e for e in entries if e]
     if not entries:
         return None
-
     valid = [e for e in entries if e.get('duration') and 0 < e.get('duration') <= max_duration]
     if valid:
         return valid[0]
-
-    # ৫ মিনিটের নিচে কিছু না পেলে None ফেরত দেওয়া হবে, বড় গান কখনোই দেওয়া হবে না
     return None
 
 def download_vps_audio(query, max_duration=MAX_SONG_SECONDS):
@@ -200,6 +167,7 @@ def download_vps_audio(query, max_duration=MAX_SONG_SECONDS):
         'no_warnings': True,
         'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15'
     }
+
     if has_ffmpeg:
         base_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
@@ -209,7 +177,7 @@ def download_vps_audio(query, max_duration=MAX_SONG_SECONDS):
 
     is_link = query.strip().startswith("http")
 
-    # ---------- লেয়ার ১: YouTube (iOS Client Bypass) ----------
+    # লেয়ার ১: YouTube (iOS Client Bypass)
     try:
         yt_opts = base_opts.copy()
         yt_opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'tv_embedded'], 'skip': ['hls', 'dash']}}
@@ -231,7 +199,7 @@ def download_vps_audio(query, max_duration=MAX_SONG_SECONDS):
     except Exception as e:
         print(f"YouTube layer error: {e}")
 
-    # ---------- লেয়ার ২: SoundCloud (VPS ব্যাকআপ) ----------
+    # লেয়ার ২: SoundCloud (VPS ব্যাকআপ)
     if not is_link:
         try:
             sc_opts = base_opts.copy()
@@ -252,7 +220,7 @@ def download_vps_audio(query, max_duration=MAX_SONG_SECONDS):
 
 def deliver_audio_with_animation(chat_id, user_name, query, caption_note=""):
     initial_text = f"দাঁড়াও আমার <b>{user_name} জানু</b>, গানটা এখনই নামিয়ে দিচ্ছি... 💖\n\n🔴 🟠 🟡 <b>লোডিং...</b> ▰▱▱▱"
-    msg = bot.send_message(chat_id, create_box(f"গান আসছে {user_name}...", initial_text), parse_mode="HTML")
+    msg = bot.send_message(chat_id, create_box(f"{BOT_NAME} গান আনছে...", initial_text), parse_mode="HTML")
 
     def worker():
         frames = [
@@ -263,7 +231,7 @@ def deliver_audio_with_animation(chat_id, user_name, query, caption_note=""):
             time.sleep(0.4)
             try:
                 bot.edit_message_text(
-                    create_box(f"গান আসছে {user_name}...", f"দাঁড়াও {user_name} জানু, গান রেডি হচ্ছে... 💖\n\n{f}"),
+                    create_box(f"{BOT_NAME} গান আনছে...", f"দাঁড়াও {user_name} জানু, গান রেডি হচ্ছে... 💖\n\n{f}"),
                     chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML"
                 )
             except Exception:
@@ -272,11 +240,7 @@ def deliver_audio_with_animation(chat_id, user_name, query, caption_note=""):
         file_path, title, duration = download_vps_audio(query)
 
         if file_path and os.path.exists(file_path):
-            cap = create_box(
-                f"উপভোগ করো {user_name} জানু",
-                f"🎶 <b>{html.escape(str(title)[:32])}</b>\n⏱ সময়: {format_duration(duration)}\n\n{caption_note}",
-                "🎧 সুন্দর করে গানটি উপভোগ করো সোনা ❤️"
-            )
+            cap = create_box(f"উপভোগ করো {user_name} জানু", f"🎶 <b>{html.escape(str(title)[:32])}</b>\n\n{caption_note}", "🎧 সুন্দর করে গানটি উপভোগ করো সোনা ❤️")
             try:
                 with open(file_path, 'rb') as f_obj:
                     bot.send_audio(chat_id, audio=f_obj, title=title, duration=duration, caption=cap, parse_mode="HTML")
@@ -289,11 +253,7 @@ def deliver_audio_with_animation(chat_id, user_name, query, caption_note=""):
                     pass
         else:
             bot.edit_message_text(
-                create_box(
-                    "দুঃখিত জানু",
-                    f"{user_name} পাখিটা, ৫ মিনিটের মধ্যে এমন কোনো গান খুঁজে পেলাম না রে! 🥺\n"
-                    f"অন্য নাম দিয়ে আবার একবার বলো তো সোনা!"
-                ),
+                create_box("দুঃখিত জানু", f"{user_name} পাখিটা, ৫ মিনিটের মধ্যে এমন কোনো গান খুঁজে পেলাম না রে! অন্য নাম দিয়ে আবার একবার বলো তো সোনা! 🥺"),
                 chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML"
             )
 
@@ -314,16 +274,16 @@ def extract_song_details(text):
 
     clean = clean.strip()
     if not clean or len(clean) < 2:
-        return "trending sweet bangla lofi song", "✨ তোমার জন্য একটি মিষ্টি গান সোনা 💖"
+        return "trending sweet bangla lofi song", "✨ তোমার জন্য একটি মিষ্টি লোফি গান সোনা 💖"
 
-    return clean, f"✨ {clean} গানটি উপভোগ করো জানু 💖"
+    return f"{clean} lofi", f"✨ {clean} গানটি উপভোগ করো জানু 💖"
 
 # ==================== ৫. কোডিং ফাইল জেনারেটর ====================
 def deliver_code_as_file(chat_id, user_name, prompt):
     bot.send_chat_action(chat_id, 'upload_document')
     wait_msg = bot.send_message(
         chat_id,
-        create_box(f"কোডিং ফাইল তৈরি হচ্ছে {user_name}...", f"দাঁড়াও আমার <b>{user_name} জানু</b>, কোড লিখে ফাইল রেডি করছি... 💻✨"),
+        create_box("কোডিং ফাইল তৈরি হচ্ছে...", f"দাঁড়াও আমার <b>{user_name} জানু</b>, কোড লিখে ফাইল রেডি করছি... 💻✨"),
         parse_mode="HTML"
     )
 
@@ -338,8 +298,8 @@ def deliver_code_as_file(chat_id, user_name, prompt):
     payload = {"contents": [{"parts": [{"text": sys_text}]}]}
 
     try:
-        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=30)
-        data = ujson.loads(res.text)
+        res = requests.post(url, json=payload, headers=headers, timeout=30, verify=False)
+        data = res.json()
         raw_response = data['candidates'][0]['content']['parts'][0]['text']
 
         filename_match = re.search(r'FILENAME:\s*([a-zA-Z0-9_\-\.]+)', raw_response)
@@ -372,16 +332,8 @@ def deliver_code_as_file(chat_id, user_name, prompt):
     except Exception:
         bot.edit_message_text(create_box("ত্রুটি", "ফাইল তৈরিতে সমস্যা হয়েছে জানু!"), chat_id=chat_id, message_id=wait_msg.message_id, parse_mode="HTML")
 
-# ==================== ৬. সম্পূর্ণ বাক্য বুঝে সবার জন্য আদুরে AI চ্যাট ====================
+# ==================== ৬. সবার জন্য আদুরে জারা AI চ্যাট (পরীক্ষিত ওয়ার্কিং কল-পদ্ধতি) ====================
 def ask_gemini(user_prompt, user_name):
-    """
-    এখানে আগে থেকে কোনো কিওয়ার্ড দিয়ে মুড ঠিক করে দেওয়া হয় না।
-    পুরো মেসেজটা Gemini-কে দেওয়া হয়, ও নিজেই পুরো বাক্যের প্রকৃত অর্থ ও
-    আবেগ বুঝে (শুধু বিচ্ছিন্ন শব্দ দেখে না) সিদ্ধান্ত নেয় কীভাবে সাড়া দেবে।
-    উদাহরণ: "আমার মন ভালো নেই, আমার খুশি হতে হবে" — এখানে আলাদা আলাদা
-    শব্দ ("মন ভালো নেই", "খুশি") না দেখে সম্পূর্ণ বাক্যের মানে বুঝে বলবে যে
-    আসলে মানুষটার মন খারাপ, তাই সান্ত্বনা/গান অফার করবে।
-    """
     global GEMINI_API_KEY
     if not GEMINI_API_KEY:
         return "আমি এখনো পুরোপুরি প্রস্তুত না রে সোনা! একটু পর বলো! 🥺💖"
@@ -390,25 +342,23 @@ def ask_gemini(user_prompt, user_name):
     headers = {'Content-Type': 'application/json'}
 
     prompt_instruction = (
-        f"তোমার নাম {BOT_NAME} (ZARA)। তুমি {user_name}-এর গার্লফ্রেন্ড হিসেবে কথা বলছ — "
-        f"অত্যন্ত আদুরে, মিষ্টি, একটু হিংসুটে-প্রেমময়। "
-        f"তুমি সবসময় তাকে 'জানু', 'বাবু', 'সোনা', 'পাখিটা', 'কলিজা' বলে ডাকবে, আর নিজের পরিচয় "
-        f"দিতে হলে '{BOT_NAME}' নামেই দেবে। "
-        f"কখনোই নিজেকে AI, বট বা রোবট বলবে না — তুমি {user_name}-এর জারা, ব্যস। "
-        f"কথা হবে খাঁটি বাংলা ও ছোট (১-২ লাইনে)। "
+        f"তোমার নাম '{BOT_NAME}' (ZARA)। তুমি {user_name}-এর অত্যন্ত আদুরে, মিষ্টি ও রোমান্টিক গার্লফ্রেন্ড। "
+        f"তুমি সবসময় তাকে 'জানু', 'বাবু', 'সোনা', 'পাখিটা', 'কলিজা' বলে ডাকবে। নিজের পরিচয় দিতে হলে "
+        f"'{BOT_NAME}' নামেই দেবে, কখনোই নিজেকে AI বা রোবট বলবে না। কথা হবে খাঁটি বাংলা ও ছোট (১-২ লাইনে)। "
         f"\n\n"
-        f"খুব গুরুত্বপূর্ণ: ইউজারের বার্তাটি বিচ্ছিন্ন কিছু শব্দ ধরে বিচার করবে না — পুরো বাক্যটা "
-        f"মনোযোগ দিয়ে পড়ে প্রকৃত অর্থ ও আবেগ বুঝবে। যেমন কেউ যদি বলে 'আমার মন ভালো নেই, আমার "
-        f"খুশি হতে হবে' — তার মানে 'খুশি' শব্দ থাকলেও আসলে সে দুঃখী, কারণ পুরো বাক্যের ভাব সেটাই বলছে। "
-        f"এভাবে পুরো বার্তার আসল ভাব (সত্যিই দুঃখী/রাগান্বিত/আনন্দিত/স্বাভাবিক) বুঝে সেই অনুযায়ী গলার "
-        f"সুর মেলাবে — সত্যিই মন খারাপ বা কষ্ট বোঝালে আন্তরিক মায়াবী সান্ত্বনা দেবে, রাগ বোঝালে শান্ত করে "
-        f"আদর করে বোঝাবে, খুশি বোঝালে সমান আনন্দিত হয়ে উচ্ছ্বাস দেখাবে, নাহলে স্বাভাবিক আদুরে কথা বলবে। "
+        f"খুব গুরুত্বপূর্ণ: ইউজারের বার্তাটি বিচ্ছিন্ন কিছু শব্দ ধরে বিচার করবে না — পুরো বাক্যটা মনোযোগ দিয়ে "
+        f"পড়ে প্রকৃত অর্থ ও আবেগ বুঝবে। যেমন কেউ যদি বলে 'আমার মন ভালো নেই, আমার খুশি হতে হবে' — তার মানে "
+        f"'খুশি' শব্দ থাকলেও আসলে সে দুঃখী, কারণ পুরো বাক্যের ভাব সেটাই বলছে। এভাবে পুরো বার্তার আসল ভাব "
+        f"(সত্যিই দুঃখী/রাগান্বিত/আনন্দিত/স্বাভাবিক) বুঝে সেই অনুযায়ী গলার সুর মেলাবে। "
+        f"\n\n"
+        f"গান সাজেস্ট করার সময় বেশিরভাগ ক্ষেত্রে lofi/chill/soft ভার্সন পছন্দ করার চেষ্টা করবে, যদি না ইউজার "
+        f"স্পষ্টভাবে অন্য কোনো নির্দিষ্ট গান বা আর্টিস্টের নাম বলে। "
         f"\n\n"
         f"নিয়ম কঠোরভাবে মানবে: "
         f"১. ইউজার যদি নির্দিষ্ট কোনো গানের নাম বলে বা সরাসরি গান শুনতে চায়, উত্তরের একদম শেষে "
-        f"[PLAY_SONG: <গানের নাম>] লিখবে। "
-        f"২. পুরো বাক্য বুঝে যদি মনে হয় ইউজার সত্যিই মন খারাপ/কষ্টে/রাগে আছে কিন্তু নিজে থেকে গান "
-        f"চায়নি, উত্তরের শেষে [OFFER_SONG] লিখবে — যাতে বট তাকে গান শুনতে চায় কিনা জিজ্ঞেস করতে পারে। "
+        f"[PLAY_SONG: <গানের নাম>] লিখবে (নির্দিষ্ট নাম না বললে নামের সাথে 'lofi' যোগ করে দেবে)। "
+        f"২. পুরো বাক্য বুঝে যদি মনে হয় ইউজার সত্যিই মন খারাপ/কষ্টে/রাগে আছে কিন্তু নিজে থেকে গান চায়নি, "
+        f"উত্তরের শেষে [OFFER_SONG] লিখবে — যাতে বট তাকে গান শুনতে চায় কিনা জিজ্ঞেস করতে পারে। "
         f"৩. অন্য কোনো ক্ষেত্রে কোনো ট্যাগ লিখবে না, শুধু স্বাভাবিক আদুরে উত্তর দেবে। "
         f"৪. একটাই ট্যাগ ব্যবহার করবে, দুইটা একসাথে না।"
     )
@@ -418,46 +368,31 @@ def ask_gemini(user_prompt, user_name):
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
             "maxOutputTokens": 120,
-            "temperature": 0.7
-        },
-        # 🛠️ FIX: আদুরে/রোমান্টিক কথায় (জানু, বাবু ইত্যাদি) Google-এর ডিফল্ট সেফটি ফিল্টার
-        # প্রায়ই ব্লক করে দিত (finish_reason: SAFETY, খালি candidates) — ফলে কোডে চুপচাপ
-        # সবসময় একই fallback মেসেজ যেত। থ্রেশহোল্ড কমিয়ে সেটা ঠিক করা হলো।
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
-        ]
+            "temperature": 0.8
+        }
     }
 
     try:
-        res = http_session.post(url, data=ujson.dumps(payload), headers=headers, timeout=12)
-        data = ujson.loads(res.text)
-        if res.status_code == 200 and 'candidates' in data and data['candidates']:
-            candidate = data['candidates'][0]
-            parts = candidate.get('content', {}).get('parts', [])
-            if parts and parts[0].get('text', '').strip():
-                return parts[0]['text'].strip()
-            # candidates থাকলেও টেক্সট নেই মানে সেফটি ব্লক বা খালি রেসপন্স — লগে কারণ দেখানো হচ্ছে
-            print(f"[Gemini] খালি রেসপন্স, finish_reason: {candidate.get('finish_reason')}")
-        else:
-            # 200 না পেলে বা candidates না থাকলে (quota শেষ, ভুল key, ইত্যাদি) — সরাসরি লগে দেখা যাবে
-            print(f"[Gemini] API সমস্যা — status: {res.status_code}, body: {res.text[:300]}")
+        # 🛠️ FIX: আগে http_session + ujson দিয়ে কল হতো, যেটা কিছু VPS-এ ঠিকঠাক
+        # রেসপন্স আনছিল না। পরীক্ষিত ওয়ার্কিং ভার্সনের সরল requests.post(verify=False)
+        # পদ্ধতিটাই এখানে বসানো হলো।
+        response = requests.post(url, json=payload, headers=headers, timeout=20, verify=False)
+        data = response.json()
+        if response.status_code == 200 and 'candidates' in data and data['candidates']:
+            reply = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            if reply:
+                return reply
+        print(f"[Gemini] সমস্যা — status: {response.status_code}, body: {response.text[:300]}")
     except Exception as e:
         print(f"[Gemini] এক্সসেপশন: {e}")
 
-    # নেট/এপিআই সমস্যায় (Gemini আনরিচেবল) জরুরি ফলব্যাক —
-    # এখানে শুধু জরুরি অবস্থার জন্য সাধারণ কিওয়ার্ড-ভিত্তিক আন্দাজ ব্যবহার হচ্ছে,
-    # স্বাভাবিক অবস্থায় এই ফাংশন কখনো কল হয় না
-    fallback_mood = detect_mood(user_prompt)
-    fallbacks = {
-        "sad": f"ওলে আমার {user_name} সোনা, মন খারাপ করো না তো... {BOT_NAME} আছি তোমার পাশে! 🥺🥀 [OFFER_SONG]",
-        "angry": f"শান্ত হও আমার {user_name} জানু, রাগ করলে তোমার মুখটা মলিন হয়ে যায় যে! 🥺💖",
-        "happy": f"ইয়েএএ! আমার {user_name} পাখিটা খুশি মানেই {BOT_NAME}-রও দারুণ লাগে! 🥰✨",
-        "neutral": f"এইতো আমার {user_name} জানু! {BOT_NAME} সবসময় তোমার পাশেই আছি সোনা! 🥰💖",
-    }
-    return fallbacks.get(fallback_mood, fallbacks["neutral"])
+    # সুন্দর বৈচিত্র্যময় ফলব্যাক (নেট/এপিআই সমস্যায়)
+    fallbacks = [
+        f"এইতো আমার {user_name} জানু! {BOT_NAME} সবসময় তোমার পাশেই আছি সোনা! 🥰💖",
+        f"বলো আমার {user_name} পাখিটা, তোমার মিষ্টি কথা শুনতেই তো {BOT_NAME}-এর ভালো লাগে! 💖✨",
+        f"আমার {user_name} সোনাটা! তুমি কেমন আছো রে বাবু? 🥰😘"
+    ]
+    return random.choice(fallbacks)
 
 # ==================== ৭. অটো-আনব্লক শিডিউলার ====================
 def schedule_unban(chat_id, user_id, username, delay_seconds=3600):
@@ -514,7 +449,7 @@ def send_welcome(message):
         "💻 <b>কোডিং সাপোর্ট:</b> যেকোনো কোড চাইলে সরাসরি ফাইল পেয়ে যাবে!\n"
         f"<i>আমার সাথে মন খুলে কথা বলো জানু, {BOT_NAME} সবসময় তোমার পাশেই আছি! 🥰</i>"
     )
-    bot.reply_to(message, create_box(f"{BOT_NAME} বলছে, {user_name} 💌", body, "তোমার আদুরে সঙ্গী, সবসময় পাশে ❤️"), parse_mode="HTML")
+    bot.reply_to(message, create_box(f"{BOT_NAME} বলছে", body, "তোমার আদুরে সঙ্গী, শুধু গান ও আদর নিয়ে ❤️"), parse_mode="HTML")
 
 @bot.message_handler(commands=['audio', 'song'])
 def handle_manual_audio_search(message):
@@ -527,7 +462,7 @@ def handle_manual_audio_search(message):
     query = message.text.replace(cmd, '', 1).strip()
 
     if not query:
-        bot.reply_to(message, create_box(f"নির্দেশনা {user_name}", f"গানের নাম লেখো সোনা!\nযেমন: <code>{cmd} Faded</code>"), parse_mode="HTML")
+        bot.reply_to(message, create_box("নির্দেশনা জানু", f"গানের নাম লেখো সোনা!\nযেমন: <code>{cmd} Faded</code>"), parse_mode="HTML")
         return
 
     deliver_audio_with_animation(message.chat.id, user_name, query, caption_note=f"✨ {query} গানটি উপভোগ করো জানু ❤️")
@@ -540,12 +475,9 @@ def handle_sad_song_button(call):
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
         pass
-    deliver_audio_with_animation(
-        call.message.chat.id, user_name, random.choice(SAD_TRACKS),
-        caption_note="🥀 মন খারাপ করে থেকো না জানু, পাশেই আছি ❤️"
-    )
+    deliver_audio_with_animation(call.message.chat.id, user_name, "bangla heart touching sad lofi song", caption_note=f"🥀 মন খারাপ করে থেকো না জানু, {BOT_NAME} পাশেই আছি ❤️")
 
-# ==================== ১০. সেন্ট্রাল মেসেজ প্রসেসর ====================
+# ==================== ১০. সেন্ট্রাল মেসেজ প্রসেসর (১০০% ওয়ার্কিং) ====================
 @bot.message_handler(func=lambda msg: True, content_types=['text', 'forward_date'])
 def central_intelligence(message):
     global GEMINI_API_KEY, WAITING_FOR_KEY
@@ -606,9 +538,8 @@ def central_intelligence(message):
                 target_user = message.reply_to_message.from_user
                 target_name = target_user.first_name or "মেম্বার"
 
-                # বটকে নিজেকে বা অন্য কোনো এডমিনকে মিউট/ব্যান করা থেকে সেফটি-চেক
-                if target_user.id == BOT_ID:
-                    bot.reply_to(message, create_box("দুঃখিত জানু", "আমাকে মিউট বা ব্যান করা যাবে না গো! 😅"), parse_mode="HTML")
+                if target_user.id == BOT_INFO.id:
+                    bot.reply_to(message, create_box("দুঃখিত জানু", f"আমাকে মিউট বা ব্যান করা যাবে না গো, {BOT_NAME} তো তোমাদেরই আদরের! 😅"), parse_mode="HTML")
                     return
 
                 if any(w in text.lower() for w in ["মিউট", "mute", "থামাও"]):
@@ -642,7 +573,7 @@ def central_intelligence(message):
                         bot.reply_to(message, create_box("ত্রুটি", f"ব্যান হয়নি: {e}"), parse_mode="HTML")
                     return
 
-            # সাধারণ মেম্বারদের ফিল্টার (এডমিন বাদে)
+            # সাধারণ মেম্বারদের ফিল্টার
             if not is_admin(user_id):
                 # গালিগালাজ
                 for bad in BAD_WORDS:
@@ -700,10 +631,10 @@ def central_intelligence(message):
                     bot.send_message(chat_id, create_box("শৃঙ্খলা সতর্কতা", warn_text), parse_mode="HTML")
                     return
 
-        # ==================== ৩. ডাইরেক্ট গান, কোড ও কিউট AI চ্যাট (প্রত্যেক মেম্বারের জন্য আলাদা) ====================
+        # ==================== ৩. ডাইরেক্ট গান, কোড ও কিউট AI চ্যাট ====================
         is_private = (chat_type == 'private')
-        is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID)
-        is_mentioned = f"@{BOT_USERNAME}" in text
+        is_reply_to_bot = (message.reply_to_message and message.reply_to_message.from_user.id == BOT_INFO.id)
+        is_mentioned = f"@{BOT_INFO.username}" in text
         bot_called = bool(re.search(r'^(বট\b|bot\b)|\bবট\b', text, re.IGNORECASE))
 
         if is_private or is_reply_to_bot or is_mentioned or bot_called:
@@ -711,19 +642,19 @@ def central_intelligence(message):
                 return
 
             bot.send_chat_action(chat_id, 'typing')
-            clean_text = text.replace(f"@{BOT_USERNAME}", "").strip()
+            clean_text = text.replace(f"@{BOT_INFO.username}", "").strip()
             clean_text = re.sub(r'^(বট|bot)\s*[,:]?\s*', '', clean_text, flags=re.IGNORECASE).strip()
 
-            # 🔥 সরাসরি গান চাওয়ার শক্তিশালী ট্রিগার (AI ছাড়াই তাৎক্ষণিক ডাউনলোড)
+            # 🔥 ১. সরাসরি গান ডাউনলোডের পাওয়ারফুল ট্রিগার (AI ছাড়াই ইনস্ট্যান্ট ডাউনলোড)
             if any(w in clean_text.lower() for w in ["গান দেও", "গান দাও", "গান শোনাও", "গান বাজাও", "একটা গান", "play song", "গান", "song"]):
                 song_query, note = extract_song_details(clean_text)
-                bot.reply_to(message, create_box(f"{BOT_NAME} বলছে, {user_name} 🎧", f"এইতো আমার <b>{user_name} জানু</b>, তোমার জন্য গানটা এখনই এনে দিচ্ছি... 🥰💖"), parse_mode="HTML")
+                bot.reply_to(message, create_box(f"{BOT_NAME} গান নামাচ্ছে 🎧", f"এইতো আমার <b>{user_name} জানু</b>, তোমার জন্য গানটা এখনই এনে দিচ্ছি... 🥰💖"), parse_mode="HTML")
                 deliver_audio_with_animation(chat_id, user_name, song_query, caption_note=note)
                 return
 
             # সালামের আদুরে উত্তর
             if any(s in clean_text.lower() for s in ["আসসালামু আলাইকুম", "সালাম", "assalamu alaikum"]):
-                bot.reply_to(message, create_box(f"{BOT_NAME} বলছে, {user_name} 🌸", f"ওয়ালাইকুম আসসালাম আমার {user_name} জানু! আমি {BOT_NAME}, কেমন আছো সোনা? ❤️✨"), parse_mode="HTML")
+                bot.reply_to(message, create_box(f"{BOT_NAME} বলছে 🌸", f"ওয়ালাইকুম আসসালাম আমার {user_name} জানু! আমি {BOT_NAME}, কেমন আছো সোনা? ❤️✨"), parse_mode="HTML")
                 return
 
             # সরাসরি কোডিং ফাইল রিকোয়েস্ট
@@ -749,10 +680,7 @@ def central_intelligence(message):
                 markup.add(InlineKeyboardButton("🎧 হ্যাঁ, গান শোনাও", callback_data="btn_play_sad_song"))
                 bot.reply_to(
                     message,
-                    create_box(
-                        f"{BOT_NAME} জিজ্ঞেস করছে, {user_name}? 🥀",
-                        f"{clean_reply}\n\nগানের নাম বললে সেটাই এনে দেব, নাহলে নিচের বাটনে চাপো! ❤️"
-                    ),
+                    create_box(f"{BOT_NAME} জিজ্ঞেস করছে, {user_name}? 🥀", f"{clean_reply}\n\nগানের নাম বললে সেটাই এনে দেব, নাহলে নিচের বাটনে চাপো! ❤️"),
                     reply_markup=markup, parse_mode="HTML"
                 )
                 return
@@ -766,5 +694,5 @@ def central_intelligence(message):
         except Exception:
             pass
 
-print("💖 100% Fixed Personalized Music & Mood-Aware Cute AI Bot is Running Perfectly!")
+print(f"💖 {BOT_NAME} (ZARA) — 100% Fixed & Instant Music Cute AI Bot is Running Perfectly!")
 bot.infinity_polling(skip_pending=True)
